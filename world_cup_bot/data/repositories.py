@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Sequence
 
+from world_cup_bot.domain.standings import StandingAdjudication
 from world_cup_bot.domain.tournament import TournamentSummary
 
 
@@ -427,7 +428,7 @@ def _row_to_guild_settings(row: Any) -> GuildSettings:
 async def _insert_audit_log(
     connection: Any,
     *,
-    guild_id: str,
+    guild_id: str | None,
     actor_user_id: str,
     action: str,
     details: dict[str, object],
@@ -456,7 +457,7 @@ class AuditLogRepository:
     async def insert(
         self,
         *,
-        guild_id: str,
+        guild_id: str | None,
         actor_user_id: str,
         action: str,
         details: dict[str, object],
@@ -469,6 +470,190 @@ class AuditLogRepository:
                 action=action,
                 details=details,
             )
+
+
+@dataclass(frozen=True)
+class StoredTieBreakerAdjudication:
+    id: int
+    tournament_id: str
+    config_hash: str
+    scope: str
+    scope_key: str
+    team_ids: tuple[str, ...]
+    ordered_team_ids: tuple[str, ...]
+    criterion: str
+    reason: str
+    actor_user_id: str
+    created_at: datetime
+
+    def to_domain(self) -> StandingAdjudication:
+        return StandingAdjudication(
+            scope="best_third" if self.scope == "best_third" else "group",
+            group_id=None if self.scope == "best_third" else self.scope_key,
+            ordered_team_ids=self.ordered_team_ids,
+            criterion=self.criterion,
+            reason=self.reason,
+        )
+
+
+class TieBreakerAdjudicationRepository:
+    def __init__(self, pool: Any) -> None:
+        self.pool = pool
+
+    async def list_for_config(
+        self,
+        *,
+        tournament_id: str,
+        config_hash: str,
+    ) -> list[StoredTieBreakerAdjudication]:
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select
+                    id,
+                    tournament_id,
+                    config_hash,
+                    scope,
+                    scope_key,
+                    team_ids,
+                    ordered_team_ids,
+                    criterion,
+                    reason,
+                    actor_user_id,
+                    created_at
+                from tie_breaker_adjudications
+                where tournament_id = $1
+                    and config_hash = $2
+                order by created_at asc, id asc
+                """,
+                tournament_id,
+                config_hash,
+            )
+        return [_row_to_tie_breaker_adjudication(row) for row in rows]
+
+    async def save_with_audit(
+        self,
+        *,
+        tournament_id: str,
+        config_hash: str,
+        scope: str,
+        scope_key: str,
+        team_ids: Sequence[str],
+        ordered_team_ids: Sequence[str],
+        criterion: str,
+        reason: str,
+        actor_user_id: str,
+    ) -> StoredTieBreakerAdjudication:
+        sorted_team_ids = tuple(sorted(str(team_id) for team_id in team_ids))
+        team_set_key = ",".join(sorted_team_ids)
+        ordered = tuple(str(team_id) for team_id in ordered_team_ids)
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                previous = await connection.fetchrow(
+                    """
+                    select
+                        id,
+                        tournament_id,
+                        config_hash,
+                        scope,
+                        scope_key,
+                        team_ids,
+                        ordered_team_ids,
+                        criterion,
+                        reason,
+                        actor_user_id,
+                        created_at
+                    from tie_breaker_adjudications
+                    where tournament_id = $1
+                        and config_hash = $2
+                        and scope = $3
+                        and scope_key = $4
+                        and team_set_key = $5
+                    """,
+                    tournament_id,
+                    config_hash,
+                    scope,
+                    scope_key,
+                    team_set_key,
+                )
+                row = await connection.fetchrow(
+                    """
+                    insert into tie_breaker_adjudications (
+                        tournament_id,
+                        config_hash,
+                        scope,
+                        scope_key,
+                        team_set_key,
+                        team_ids,
+                        ordered_team_ids,
+                        criterion,
+                        reason,
+                        actor_user_id
+                    )
+                    values (
+                        $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb,
+                        $8, $9, $10
+                    )
+                    on conflict (
+                        tournament_id,
+                        config_hash,
+                        scope,
+                        scope_key,
+                        team_set_key
+                    ) do update set
+                        team_ids = excluded.team_ids,
+                        ordered_team_ids = excluded.ordered_team_ids,
+                        criterion = excluded.criterion,
+                        reason = excluded.reason,
+                        actor_user_id = excluded.actor_user_id,
+                        created_at = now()
+                    returning
+                        id,
+                        tournament_id,
+                        config_hash,
+                        scope,
+                        scope_key,
+                        team_ids,
+                        ordered_team_ids,
+                        criterion,
+                        reason,
+                        actor_user_id,
+                        created_at
+                    """,
+                    tournament_id,
+                    config_hash,
+                    scope,
+                    scope_key,
+                    team_set_key,
+                    json.dumps(list(sorted_team_ids), sort_keys=True),
+                    json.dumps(list(ordered), sort_keys=True),
+                    criterion,
+                    reason,
+                    actor_user_id,
+                )
+                await _insert_audit_log(
+                    connection,
+                    guild_id=None,
+                    actor_user_id=actor_user_id,
+                    action="tie_breaker_adjudicated",
+                    details={
+                        "tournament_id": tournament_id,
+                        "config_hash": config_hash,
+                        "scope": scope,
+                        "scope_key": scope_key,
+                        "team_ids": list(sorted_team_ids),
+                        "ordered_team_ids": list(ordered),
+                        "criterion": criterion,
+                        "reason": reason,
+                        "previous": (
+                            _tie_breaker_audit_snapshot(previous)
+                            if previous
+                            else None
+                        ),
+                    },
+                )
+
+        return _row_to_tie_breaker_adjudication(row)
 
 
 @dataclass(frozen=True)
@@ -1507,8 +1692,45 @@ def _row_to_prediction_score(row: Any) -> PredictionScore:
     )
 
 
+def _row_to_tie_breaker_adjudication(row: Any) -> StoredTieBreakerAdjudication:
+    return StoredTieBreakerAdjudication(
+        id=row["id"],
+        tournament_id=row["tournament_id"],
+        config_hash=row["config_hash"],
+        scope=row["scope"],
+        scope_key=row["scope_key"],
+        team_ids=tuple(_json_list(row["team_ids"])),
+        ordered_team_ids=tuple(_json_list(row["ordered_team_ids"])),
+        criterion=row["criterion"],
+        reason=row["reason"],
+        actor_user_id=row["actor_user_id"],
+        created_at=row["created_at"],
+    )
+
+
+def _tie_breaker_audit_snapshot(row: Any) -> dict[str, object]:
+    return {
+        "id": row["id"],
+        "team_ids": _json_list(row["team_ids"]),
+        "ordered_team_ids": _json_list(row["ordered_team_ids"]),
+        "criterion": row["criterion"],
+        "reason": row["reason"],
+        "actor_user_id": row["actor_user_id"],
+        "created_at": row["created_at"].isoformat(),
+    }
+
+
 def _json_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         decoded = json.loads(value)
         return dict(decoded) if isinstance(decoded, dict) else {}
     return dict(value) if value else {}
+
+
+def _json_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        decoded = json.loads(value)
+        return [str(item) for item in decoded] if isinstance(decoded, list) else []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []

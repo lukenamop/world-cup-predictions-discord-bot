@@ -12,6 +12,7 @@ from world_cup_bot.data.repositories import (
     PredictionScoreRepository,
     ResultRepository,
     StoredMatchResult,
+    TieBreakerAdjudicationRepository,
     TournamentConfigRepository,
 )
 from world_cup_bot.domain.predictions import (
@@ -19,8 +20,13 @@ from world_cup_bot.domain.predictions import (
     TournamentModel,
     prediction_summary,
 )
-from world_cup_bot.domain.scoring import SCORING_VERSION, ScoringRules, score_prediction
-from world_cup_bot.domain.standings import MatchResult
+from world_cup_bot.domain.scoring import (
+    SCORING_VERSION,
+    ScoringRules,
+    actual_tournament_data,
+    score_prediction,
+)
+from world_cup_bot.domain.standings import MatchResult, StandingResolutionError
 
 
 class LeaderboardServiceError(RuntimeError):
@@ -50,6 +56,7 @@ class LeaderboardService:
         self.predictions = PredictionRepository(pool)
         self.results = ResultRepository(pool)
         self.scores = PredictionScoreRepository(pool)
+        self.tie_breakers = TieBreakerAdjudicationRepository(pool)
 
     async def recalculate(self, *, guild_id: str) -> RecalculationSummary:
         tournament = await self.tournaments.get_active_config(guild_id)
@@ -64,6 +71,20 @@ class LeaderboardService:
             tournament_config_id=tournament.id,
         )
         match_results = [_to_domain_result(result) for result in stored_results]
+        adjudications = [
+            adjudication.to_domain()
+            for adjudication in await self.tie_breakers.list_for_config(
+                tournament_id=tournament.tournament_id,
+                config_hash=tournament.config_hash,
+            )
+        ]
+        try:
+            actual_tournament_data(model, match_results, adjudications=adjudications)
+        except StandingResolutionError as exc:
+            raise LeaderboardServiceError(
+                "Cannot recalculate until official tie-breakers are resolved. "
+                f"{exc}"
+            ) from exc
         entries = await self.predictions.list_submitted_entries(
             guild_id=guild_id,
             tournament_config_id=tournament.id,
@@ -78,6 +99,7 @@ class LeaderboardService:
                 entry.submitted_data,
                 match_results,
                 rules=rules,
+                adjudications=adjudications,
             )
             scores.append(
                 PredictionScore(

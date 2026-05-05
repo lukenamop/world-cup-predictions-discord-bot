@@ -204,6 +204,7 @@ Admin commands require Discord Manage Guild permission by default. Additional us
 Operator commands:
 
 - `/operator sync`: fetches live provider data once and applies it globally to all configured guilds.
+- `/operator resolve`: records an official adjudication for a group or best-third-place standings tie that cannot be resolved from deterministic match-result criteria available to the bot.
 
 Operator commands are registered only in `OPERATOR_GUILD_ID`. Invocation requires Discord Administrator permission in that guild or a user ID listed in `OWNER_USER_IDS`.
 
@@ -318,9 +319,14 @@ Visual design:
 
 - Complete group and best-third-place ranking rules against the official
   tournament tie-breakers.
-- Add a clear admin resolution path for any tie-breaker the bot cannot determine
-  from provider data, such as fair play or drawing lots.
-- Store and audit tie-breaker overrides or adjudications.
+- Group ties use head-to-head points, head-to-head goal difference,
+  head-to-head goals scored, overall goal difference, overall goals scored,
+  team conduct score, then the most recent FIFA/Coca-Cola Men's World Ranking.
+- Best third-place ranking uses points, goal difference, goals scored, team
+  conduct score, then the most recent FIFA/Coca-Cola Men's World Ranking.
+- Add a clear operator resolution path for any tie-breaker the bot cannot
+  determine from provider data, such as team conduct score or FIFA ranking.
+- Store and audit tie-breaker adjudications.
 - Add tests for tied group standings, best third-place ordering, unresolved tie
   handling, and recalculation after adjudication.
 

@@ -11,6 +11,7 @@ from world_cup_bot.data.repositories import (
     ResultRepository,
     ResultSyncRun,
     StoredMatchResult,
+    TieBreakerAdjudicationRepository,
     TournamentConfigRepository,
 )
 from world_cup_bot.domain.predictions import (
@@ -20,7 +21,12 @@ from world_cup_bot.domain.predictions import (
     get_round_matches,
 )
 from world_cup_bot.domain.scoring import actual_tournament_data
-from world_cup_bot.domain.standings import FINISHED_STATUSES, MatchResult
+from world_cup_bot.domain.standings import (
+    FINISHED_STATUSES,
+    MatchResult,
+    StandingAdjudication,
+    StandingResolutionError,
+)
 from world_cup_bot.services.live_results_client import (
     LiveMatchResult,
     LiveResultsClient,
@@ -65,6 +71,7 @@ class ResultSyncService:
     ) -> None:
         self.tournaments = TournamentConfigRepository(pool)
         self.results = ResultRepository(pool)
+        self.tie_breakers = TieBreakerAdjudicationRepository(pool)
         self.provider_name = provider_name
         self.client = client
 
@@ -123,10 +130,18 @@ class ResultSyncService:
         )
 
         try:
+            adjudications = [
+                adjudication.to_domain()
+                for adjudication in await self.tie_breakers.list_for_config(
+                    tournament_id=tournament.tournament_id,
+                    config_hash=tournament.config_hash,
+                )
+            ]
             stored, skipped = _map_live_results(
                 provider_name=fetched.provider_name,
                 tournament_config=tournament.config,
                 live_results=fetched.live_results,
+                adjudications=adjudications,
             )
             delay_warnings = await self._record_delay_warnings(
                 provider_name=fetched.provider_name,
@@ -249,6 +264,7 @@ def _map_live_results(
     provider_name: str,
     tournament_config: Mapping[str, Any],
     live_results: list[LiveMatchResult],
+    adjudications: Sequence[StandingAdjudication] = (),
 ) -> tuple[list[StoredMatchResult], list[str]]:
     live_by_provider_id = {
         live_result.provider_match_id: live_result
@@ -276,10 +292,19 @@ def _map_live_results(
 
     if knockout_fixture_lookup:
         model = TournamentModel.from_config(tournament_config)
-        actual_data = actual_tournament_data(
-            model,
-            [_to_domain_result(result) for result in stored],
-        )
+        try:
+            actual_data = actual_tournament_data(
+                model,
+                [_to_domain_result(result) for result in stored],
+                adjudications=adjudications,
+            )
+        except StandingResolutionError:
+            skipped.extend(
+                provider_match_id
+                for provider_match_id in knockout_fixture_lookup
+                if provider_match_id in live_by_provider_id
+            )
+            return stored, skipped
         knockout = actual_data.setdefault("knockout", {})
         for round_name in ROUND_ORDER:
             try:

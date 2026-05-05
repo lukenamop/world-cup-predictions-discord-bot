@@ -73,12 +73,9 @@ class PredictionsCog(commands.Cog):
             return
 
         await ctx.defer(ephemeral=True)
-        service = PredictionViewService(self.bot.database.pool)
-        actual_data = await service.actual_data(
-            guild_id=snapshot.guild_id,
-            tournament_config_id=snapshot.entry.tournament_config_id,
-            model=snapshot.model,
-        )
+        actual_data = await self._actual_data_or_respond(ctx, snapshot)
+        if actual_data is None:
+            return
         png = render_groups_png(group_sheet_render_model(snapshot, actual_data))
         await ctx.respond(
             embed=_prediction_summary_embed(snapshot),
@@ -100,12 +97,9 @@ class PredictionsCog(commands.Cog):
             return
 
         await ctx.defer(ephemeral=True)
-        service = PredictionViewService(self.bot.database.pool)
-        actual_data = await service.actual_data(
-            guild_id=snapshot.guild_id,
-            tournament_config_id=snapshot.entry.tournament_config_id,
-            model=snapshot.model,
-        )
+        actual_data = await self._actual_data_or_respond(ctx, snapshot)
+        if actual_data is None:
+            return
         png = render_bracket_png(bracket_render_model(snapshot, actual_data))
         await ctx.respond(
             embed=_prediction_summary_embed(snapshot),
@@ -160,6 +154,22 @@ class PredictionsCog(commands.Cog):
                 guild_id=str(ctx.guild.id),
                 target_user_id=str(target.id),
                 viewer_user_id=str(ctx.author.id),
+            )
+        except PredictionViewServiceError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return None
+
+    async def _actual_data_or_respond(
+        self,
+        ctx: discord.ApplicationContext,
+        snapshot: PredictionSnapshot,
+    ) -> dict[str, Any] | None:
+        service = PredictionViewService(self.bot.database.pool)
+        try:
+            return await service.actual_data(
+                guild_id=snapshot.guild_id,
+                tournament_config_id=snapshot.entry.tournament_config_id,
+                model=snapshot.model,
             )
         except PredictionViewServiceError as exc:
             await ctx.respond(str(exc), ephemeral=True)

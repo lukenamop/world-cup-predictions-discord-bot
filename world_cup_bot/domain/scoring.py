@@ -11,6 +11,7 @@ from world_cup_bot.domain.predictions import (
 )
 from world_cup_bot.domain.standings import (
     MatchResult,
+    StandingAdjudication,
     actual_group_rankings,
     best_third_place_qualifiers,
     compute_group_standings,
@@ -89,20 +90,24 @@ def score_prediction(
     results: Iterable[MatchResult],
     *,
     rules: ScoringRules | None = None,
+    adjudications: Iterable[StandingAdjudication] = (),
 ) -> ScoreBreakdown:
     active_rules = rules or ScoringRules()
     result_list = list(results)
+    adjudication_list = tuple(adjudications)
     group_breakdown = _score_groups(
         model,
         prediction_data,
         result_list,
         active_rules,
+        adjudications=adjudication_list,
     )
     knockout_breakdown = _score_knockout(
         model,
         prediction_data,
         result_list,
         active_rules,
+        adjudications=adjudication_list,
     )
     group_points = int(group_breakdown["points"])
     knockout_points = int(knockout_breakdown["points"])
@@ -121,9 +126,16 @@ def score_prediction(
 def actual_tournament_data(
     model: TournamentModel,
     results: Iterable[MatchResult],
+    *,
+    adjudications: Iterable[StandingAdjudication] = (),
 ) -> dict[str, Any]:
     result_list = list(results)
-    standings = compute_group_standings(model, result_list)
+    adjudication_list = tuple(adjudications)
+    standings = compute_group_standings(
+        model,
+        result_list,
+        adjudications=adjudication_list,
+    )
     rankings = {
         group_id: [standing.team_id for standing in rows]
         for group_id, rows in standings.items()
@@ -136,12 +148,21 @@ def actual_tournament_data(
             "seeded_round_of_32": [],
             "knockout": {},
         }
-    qualifiers = best_third_place_qualifiers(model, standings)
+    qualifiers = best_third_place_qualifiers(
+        model,
+        standings,
+        adjudications=adjudication_list,
+    )
     return {
         "group_rankings": rankings,
         "third_place_qualifier_team_ids": list(qualifiers),
         "seeded_round_of_32": [],
-        "knockout": _actual_knockout_data(model, result_list, qualifiers),
+        "knockout": _actual_knockout_data(
+            model,
+            result_list,
+            qualifiers,
+            adjudications=adjudication_list,
+        ),
     }
 
 
@@ -150,8 +171,14 @@ def _score_groups(
     prediction_data: Mapping[str, Any],
     results: list[MatchResult],
     rules: ScoringRules,
+    *,
+    adjudications: tuple[StandingAdjudication, ...],
 ) -> dict[str, Any]:
-    standings = compute_group_standings(model, results)
+    standings = compute_group_standings(
+        model,
+        results,
+        adjudications=adjudications,
+    )
     actual_rankings = {
         group_id: [standing.team_id for standing in rows]
         for group_id, rows in standings.items()
@@ -159,7 +186,7 @@ def _score_groups(
     }
     all_groups_complete = len(actual_rankings) == len(model.groups)
     actual_thirds = (
-        set(best_third_place_qualifiers(model, standings))
+        set(best_third_place_qualifiers(model, standings, adjudications=adjudications))
         if all_groups_complete
         else set()
     )
@@ -206,8 +233,14 @@ def _score_knockout(
     prediction_data: Mapping[str, Any],
     results: list[MatchResult],
     rules: ScoringRules,
+    *,
+    adjudications: tuple[StandingAdjudication, ...],
 ) -> dict[str, Any]:
-    actual_data = actual_tournament_data(model, results)
+    actual_data = actual_tournament_data(
+        model,
+        results,
+        adjudications=adjudications,
+    )
     predicted_advancement = _advancement_by_round(model, prediction_data)
     actual_advancement = _advancement_by_round(model, actual_data)
     round_values = {
@@ -264,9 +297,15 @@ def _actual_knockout_data(
     model: TournamentModel,
     results: list[MatchResult],
     third_place_qualifier_team_ids: tuple[str, ...],
+    *,
+    adjudications: tuple[StandingAdjudication, ...],
 ) -> dict[str, list[dict[str, Any]]]:
     data = {
-        "group_rankings": actual_group_rankings(model, results),
+        "group_rankings": actual_group_rankings(
+            model,
+            results,
+            adjudications=adjudications,
+        ),
         "third_place_qualifier_team_ids": list(third_place_qualifier_team_ids),
         "seeded_round_of_32": [],
         "knockout": {},

@@ -6,7 +6,13 @@ from collections.abc import Sequence
 import discord
 from discord.ext import commands
 
-from world_cup_bot.data.repositories import AuditLogRepository
+from world_cup_bot.data.repositories import (
+    AuditLogRepository,
+    GuildActiveTournamentConfig,
+    TieBreakerAdjudicationRepository,
+    TournamentConfigRepository,
+)
+from world_cup_bot.domain.predictions import TournamentModel
 from world_cup_bot.jobs.result_sync import (
     ResultSyncFailure,
     ResultSyncJobReport,
@@ -54,6 +60,85 @@ class OperatorCog(commands.Cog):
             )
         await ctx.respond(
             _sync_response_message(report),
+            ephemeral=True,
+        )
+
+    @operator.command(
+        name="resolve",
+        description="Adjudicate an official standings tie for the active tournament.",
+    )
+    async def resolve_command(
+        self,
+        ctx: discord.ApplicationContext,
+        scope: str,
+        ordered_team_ids: str,
+        reason: str,
+        group_id: str | None = None,
+        config_hash: str | None = None,
+    ) -> None:
+        if not await self._ensure_operator(ctx):
+            return
+
+        normalized_scope = scope.strip().lower()
+        if normalized_scope not in {"group", "best_third"}:
+            await ctx.respond(
+                "Scope must be `group` or `best_third`.",
+                ephemeral=True,
+            )
+            return
+        teams = _parse_ordered_team_ids(ordered_team_ids)
+        if len(teams) < 2:
+            await ctx.respond(
+                "Provide at least two ordered team IDs, separated by commas.",
+                ephemeral=True,
+            )
+            return
+        if len(set(teams)) != len(teams):
+            await ctx.respond("Each team ID can appear only once.", ephemeral=True)
+            return
+        if not reason.strip():
+            await ctx.respond("Provide an official adjudication reason.", ephemeral=True)
+            return
+        if normalized_scope == "group" and not group_id:
+            await ctx.respond("Group adjudications require `group_id`.", ephemeral=True)
+            return
+        if normalized_scope == "best_third":
+            group_id = None
+
+        try:
+            tournament = await _select_resolution_tournament(
+                self.bot.database.pool,
+                config_hash=config_hash,
+            )
+        except ValueError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+        try:
+            _validate_resolution_teams(
+                tournament,
+                scope=normalized_scope,
+                group_id=group_id,
+                team_ids=teams,
+            )
+        except ValueError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        adjudication = await TieBreakerAdjudicationRepository(
+            self.bot.database.pool
+        ).save_with_audit(
+            tournament_id=tournament.tournament_id,
+            config_hash=tournament.config_hash,
+            scope=normalized_scope,
+            scope_key=group_id.strip().upper() if group_id else "best_third",
+            team_ids=teams,
+            ordered_team_ids=teams,
+            criterion="operator_adjudication",
+            reason=reason.strip(),
+            actor_user_id=str(ctx.author.id),
+        )
+        await ctx.respond(
+            _resolve_response_message(adjudication),
             ephemeral=True,
         )
 
@@ -135,3 +220,67 @@ def _format_failed_guilds(failures: Sequence[ResultSyncFailure]) -> str:
     if len(failures) <= 10:
         return visible
     return f"{visible}, +{len(failures) - 10} more"
+
+
+async def _select_resolution_tournament(
+    pool: object,
+    *,
+    config_hash: str | None,
+) -> GuildActiveTournamentConfig:
+    tournaments = await TournamentConfigRepository(pool).list_active_configs()
+    if not tournaments:
+        raise ValueError("No active tournament configs are available.")
+    grouped: dict[str, GuildActiveTournamentConfig] = {}
+    for tournament in tournaments:
+        grouped.setdefault(tournament.config_hash, tournament)
+    if config_hash:
+        for tournament in grouped.values():
+            if tournament.config_hash == config_hash:
+                return tournament
+        raise ValueError("No active tournament config matches that config_hash.")
+    if len(grouped) > 1:
+        hashes = ", ".join(sorted(grouped)[:5])
+        raise ValueError(
+            "Multiple active tournament configs are present. "
+            f"Pass config_hash. Active hashes: {hashes}"
+        )
+    return next(iter(grouped.values()))
+
+
+def _parse_ordered_team_ids(value: str) -> tuple[str, ...]:
+    return tuple(
+        team_id.strip().upper()
+        for team_id in value.split(",")
+        if team_id.strip()
+    )
+
+
+def _validate_resolution_teams(
+    tournament: GuildActiveTournamentConfig,
+    *,
+    scope: str,
+    group_id: str | None,
+    team_ids: tuple[str, ...],
+) -> None:
+    model = TournamentModel.from_config(tournament.config)
+    unknown = sorted(set(team_ids) - set(model.teams_by_id))
+    if unknown:
+        raise ValueError(f"Unknown team ID(s): {', '.join(unknown)}.")
+    if scope == "group":
+        group_key = str(group_id).strip().upper()
+        group = model.groups_by_id.get(group_key)
+        if group is None:
+            raise ValueError(f"Unknown group ID: {group_key}.")
+        outside_group = sorted(set(team_ids) - set(group.team_ids))
+        if outside_group:
+            raise ValueError(
+                f"Team ID(s) outside group {group_key}: {', '.join(outside_group)}."
+            )
+
+
+def _resolve_response_message(adjudication: object) -> str:
+    return (
+        "Tie-breaker adjudication saved. "
+        f"Scope: {adjudication.scope} {adjudication.scope_key}. "
+        f"Order: {', '.join(adjudication.ordered_team_ids)}."
+    )

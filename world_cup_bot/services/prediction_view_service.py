@@ -14,6 +14,7 @@ from world_cup_bot.data.repositories import (
     ResultRepository,
     ResultSyncRun,
     StoredMatchResult,
+    TieBreakerAdjudicationRepository,
     TournamentConfigRepository,
     UserPreferences,
     UserPreferencesRepository,
@@ -28,7 +29,7 @@ from world_cup_bot.domain.predictions import (
     prediction_summary,
 )
 from world_cup_bot.domain.scoring import actual_tournament_data
-from world_cup_bot.domain.standings import MatchResult
+from world_cup_bot.domain.standings import MatchResult, StandingResolutionError
 
 
 class PredictionViewServiceError(RuntimeError):
@@ -115,6 +116,7 @@ class PredictionViewService:
         self.preferences = UserPreferencesRepository(pool)
         self.results = ResultRepository(pool)
         self.scores = PredictionScoreRepository(pool)
+        self.tie_breakers = TieBreakerAdjudicationRepository(pool)
 
     async def snapshot(
         self,
@@ -189,10 +191,27 @@ class PredictionViewService:
             guild_id=guild_id,
             tournament_config_id=tournament_config_id,
         )
-        return actual_tournament_data(
-            model,
-            [_to_domain_result(result) for result in stored_results],
-        )
+        tournament = await self.tournaments.get_active_config(guild_id)
+        adjudications = []
+        if tournament is not None and tournament.id == tournament_config_id:
+            adjudications = [
+                adjudication.to_domain()
+                for adjudication in await self.tie_breakers.list_for_config(
+                    tournament_id=tournament.tournament_id,
+                    config_hash=tournament.config_hash,
+                )
+            ]
+        try:
+            return actual_tournament_data(
+                model,
+                [_to_domain_result(result) for result in stored_results],
+                adjudications=adjudications,
+            )
+        except StandingResolutionError as exc:
+            raise PredictionViewServiceError(
+                "Cannot render current results until official tie-breakers are "
+                f"resolved. {exc}"
+            ) from exc
 
     async def set_share_full_bracket(
         self,

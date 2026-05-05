@@ -9,6 +9,7 @@ from world_cup_bot.data.repositories import (
     GuildSettings,
     PredictionEntry,
     PredictionScore,
+    StoredMatchResult,
     UserPreferences,
 )
 from world_cup_bot.domain.predictions import (
@@ -23,6 +24,7 @@ from world_cup_bot.services.leaderboard_service import RankedScore, leaderboard_
 from world_cup_bot.services.prediction_view_service import (
     PredictionSnapshot,
     PredictionViewService,
+    PredictionViewServiceError,
     bracket_render_model,
     group_sheet_render_model,
 )
@@ -149,6 +151,35 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(snapshot.can_view_full_prediction)
 
+    async def test_actual_data_reports_unresolved_tie_as_view_error(self) -> None:
+        config = _prediction_config()
+        model = TournamentModel.from_config(config)
+        submitted_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        service = PredictionViewService(pool=None)
+        service.tournaments = _FakeTournamentRepository(
+            ActiveTournamentConfig(
+                id=1,
+                tournament_id="test",
+                tournament_name="Test Cup",
+                schema_version="test",
+                config_hash="hash",
+                config=config,
+                imported_at=submitted_at,
+                imported_by_user_id="admin-1",
+            )
+        )
+        service.results = _FakeResultRepository(_unresolved_group_results(model))
+        service.tie_breakers = _FakeTieBreakerRepository()
+
+        with self.assertRaises(PredictionViewServiceError) as raised:
+            await service.actual_data(
+                guild_id="guild-1",
+                tournament_config_id=1,
+                model=model,
+            )
+
+        self.assertIn("official tie-breakers", str(raised.exception))
+
 
 def _snapshot(
     *,
@@ -267,7 +298,36 @@ def _view_service_with_privacy_default(
     )
     service.results = _FakeResultRepository()
     service.scores = _FakeScoreRepository()
+    service.tie_breakers = _FakeTieBreakerRepository()
     return service
+
+
+def _unresolved_group_results(model: TournamentModel) -> list[StoredMatchResult]:
+    results: list[StoredMatchResult] = []
+    for group in model.groups:
+        match_number = 1
+        for home_index, home_team_id in enumerate(group.team_ids):
+            for away_team_id in group.team_ids[home_index + 1 :]:
+                match_id = f"{group.id}-{match_number}"
+                results.append(
+                    StoredMatchResult(
+                        match_id=match_id,
+                        provider="test",
+                        provider_match_id=match_id,
+                        stage="group",
+                        round_name=None,
+                        group_id=group.id,
+                        home_team_id=home_team_id,
+                        away_team_id=away_team_id,
+                        home_score=0,
+                        away_score=0,
+                        status="FINISHED",
+                        winner_team_id=None,
+                        played_at=None,
+                    )
+                )
+                match_number += 1
+    return results
 
 
 def _complete_home_winner_prediction(model: TournamentModel) -> dict[str, object]:
@@ -426,6 +486,9 @@ class _FakePreferencesRepository:
 
 
 class _FakeResultRepository:
+    def __init__(self, results: list[StoredMatchResult] | None = None) -> None:
+        self.results = results or []
+
     async def latest_sync_run(
         self,
         *,
@@ -433,6 +496,14 @@ class _FakeResultRepository:
         tournament_config_id: int | None = None,
     ) -> None:
         return None
+
+    async def list_match_results(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+    ) -> list[StoredMatchResult]:
+        return self.results
 
 
 class _FakeScoreRepository:
@@ -444,3 +515,13 @@ class _FakeScoreRepository:
         user_id: str,
     ) -> None:
         return None
+
+
+class _FakeTieBreakerRepository:
+    async def list_for_config(
+        self,
+        *,
+        tournament_id: str,
+        config_hash: str,
+    ) -> list[object]:
+        return []

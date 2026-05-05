@@ -26,6 +26,7 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/admin export` returns a JSON export of submitted predictions and current scores.
 - `/admin backup` returns an operator-friendly JSON backup of league settings, active tournament config, predictions, scores, stored results, and recent sync runs.
 - `/operator sync` runs one global live-result sync for all configured guilds. It is registered only in `OPERATOR_GUILD_ID` and requires Discord Administrator permission or an ID listed in `OWNER_USER_IDS`.
+- `/operator resolve` records an audited official adjudication for a group or best-third-place tie that cannot be resolved from available match-result criteria.
 
 Admin commands require Discord Manage Server permission by default. Grant role or member overrides through Discord Server Settings > Integrations > Command Permissions.
 
@@ -81,7 +82,7 @@ Optional environment variables:
 - `DEFAULT_TIMEZONE`, default `America/Indiana/Indianapolis`
 - `LIVE_RESULTS_PROVIDER`, default `fifa_public_calendar`
 
-`LIVE_RESULTS_PROVIDER` is operator-level configuration. Individual Discord servers cannot select a live provider. `OPERATOR_GUILD_ID` is optional for normal background sync, but must be set to use `/operator sync`.
+`LIVE_RESULTS_PROVIDER` is operator-level configuration. Individual Discord servers cannot select a live provider. `OPERATOR_GUILD_ID` is optional for normal background sync, but must be set to use `/operator sync` or `/operator resolve`.
 
 ## Running The Bot
 
@@ -187,6 +188,15 @@ Manual recalculation without fetching new provider data:
 ```
 
 Scoring uses the MVP defaults from `PRODUCT-SPEC.md`: group winner 3, group runner-up 2, third-place qualifier 1, Round of 32 1, Round of 16 2, quarter-final 5, semi-final 10, final 15, third-place winner 10, champion 25, and runner-up 15. Admins can adjust those values with `/admin config`. Group winner/runner-up and best-third points are awarded only after the relevant group stage data is complete. Knockout points are team-advancement based: a user gets credit when a predicted team reaches the scored round, even if the exact path differs.
+
+Official group standings use the 2026 FIFA tie-breaker order: head-to-head points, head-to-head goal difference, head-to-head goals scored, overall goal difference, overall goals scored, team conduct score, then the most recent FIFA/Coca-Cola Men's World Ranking. Best third-place ranking uses points, goal difference, goals scored, team conduct score, then FIFA ranking. If stored results cannot resolve a required tie from deterministic match data, recalculation fails loudly until an operator records the official adjudication:
+
+```text
+/operator resolve scope:group group_id:A ordered_team_ids:MEX,RSA,KOR reason:Official FIFA ranking fallback
+/operator resolve scope:best_third ordered_team_ids:A3,C3,F3 reason:Official FIFA adjudication
+```
+
+Tie-breaker adjudications are stored by tournament ID and config hash, then audited with actor, scope, tied teams, chosen order, criterion, reason, and previous value.
 
 ## Admin Setup And Configuration
 

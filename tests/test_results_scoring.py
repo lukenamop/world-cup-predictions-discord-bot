@@ -15,6 +15,9 @@ from world_cup_bot.domain.predictions import (
 from world_cup_bot.domain.scoring import ScoringRules, score_prediction
 from world_cup_bot.domain.standings import (
     MatchResult,
+    StandingAdjudication,
+    StandingResolutionError,
+    TeamStanding,
     best_third_place_qualifiers,
     compute_group_standings,
 )
@@ -45,6 +48,138 @@ class StandingsTests(unittest.TestCase):
             best_third_place_qualifiers(model, standings),
             ("A3", "B3", "C3", "D3", "E3", "F3", "G3", "H3"),
         )
+
+    def test_group_standings_use_head_to_head_before_goal_difference(self) -> None:
+        model = TournamentModel.from_config(_four_team_group_config())
+        results = [
+            _group_result("A-1", "A", "A1", "A2", 1, 0),
+            _group_result("A-2", "A", "A1", "A3", 1, 0),
+            _group_result("A-3", "A", "A1", "A4", 0, 3),
+            _group_result("A-4", "A", "A2", "A3", 5, 0),
+            _group_result("A-5", "A", "A2", "A4", 5, 0),
+            _group_result("A-6", "A", "A3", "A4", 1, 0),
+        ]
+
+        standings = compute_group_standings(model, results)
+
+        self.assertEqual(
+            [row.team_id for row in standings["A"]],
+            ["A1", "A2", "A3", "A4"],
+        )
+
+    def test_group_standings_raise_for_unresolved_official_tie(self) -> None:
+        model = TournamentModel.from_config(_simple_group_config())
+        results = [
+            _group_result("A-1", "A", "A1", "A2", 0, 0),
+            _group_result("A-2", "A", "A1", "A3", 0, 0),
+            _group_result("A-3", "A", "A2", "A3", 0, 0),
+        ]
+
+        with self.assertRaises(StandingResolutionError) as raised:
+            compute_group_standings(model, results)
+
+        self.assertEqual(raised.exception.unresolved_ties[0].scope, "group")
+        self.assertEqual(raised.exception.unresolved_ties[0].group_id, "A")
+
+    def test_group_standings_use_operator_adjudication_for_unresolved_tie(self) -> None:
+        model = TournamentModel.from_config(_simple_group_config())
+        results = [
+            _group_result("A-1", "A", "A1", "A2", 0, 0),
+            _group_result("A-2", "A", "A1", "A3", 0, 0),
+            _group_result("A-3", "A", "A2", "A3", 0, 0),
+        ]
+
+        standings = compute_group_standings(
+            model,
+            results,
+            adjudications=[
+                StandingAdjudication(
+                    scope="group",
+                    group_id="A",
+                    ordered_team_ids=("A2", "A3", "A1"),
+                    reason="Official FIFA ranking fallback",
+                )
+            ],
+        )
+
+        self.assertEqual(
+            [row.team_id for row in standings["A"]],
+            ["A2", "A3", "A1"],
+        )
+
+    def test_best_thirds_raise_for_unresolved_tie(self) -> None:
+        model = TournamentModel.from_config(_prediction_config())
+        rows = {
+            group.id: (
+                _standing(group.id, group.team_ids[0], 6, 4, 3),
+                _standing(group.id, group.team_ids[1], 3, 0, 3),
+                _standing(group.id, group.team_ids[2], 0, -4, 0),
+            )
+            for group in model.groups
+        }
+
+        with self.assertRaises(StandingResolutionError) as raised:
+            best_third_place_qualifiers(model, rows)
+
+        self.assertEqual(raised.exception.unresolved_ties[0].scope, "best_third")
+
+    def test_best_thirds_use_operator_adjudication_for_unresolved_tie(self) -> None:
+        model = TournamentModel.from_config(_prediction_config())
+        rows = {
+            group.id: (
+                _standing(group.id, group.team_ids[0], 6, 4, 3),
+                _standing(group.id, group.team_ids[1], 3, 0, 3),
+                _standing(group.id, group.team_ids[2], 0, -4, 0),
+            )
+            for group in model.groups
+        }
+        ordered = tuple(f"{group_id}3" for group_id in "LKJIHGFEDCBA")
+
+        qualifiers = best_third_place_qualifiers(
+            model,
+            rows,
+            adjudications=[
+                StandingAdjudication(
+                    scope="best_third",
+                    ordered_team_ids=ordered,
+                    reason="Official FIFA ranking fallback",
+                )
+            ],
+        )
+
+        self.assertEqual(qualifiers, ordered[:8])
+
+    def test_best_thirds_ignore_ties_below_qualifier_cutoff(self) -> None:
+        model = TournamentModel.from_config(_prediction_config())
+        rows = {}
+        for group_index, group in enumerate(model.groups):
+            third_points = 3 if group_index < 8 else 0
+            rows[group.id] = (
+                _standing(group.id, group.team_ids[0], 6, 4, 3),
+                _standing(group.id, group.team_ids[1], 3, 0, 3),
+                _standing(group.id, group.team_ids[2], third_points, 0, 1),
+            )
+
+        qualifiers = best_third_place_qualifiers(model, rows)
+
+        self.assertEqual(
+            qualifiers,
+            ("A3", "B3", "C3", "D3", "E3", "F3", "G3", "H3"),
+        )
+
+    def test_best_thirds_return_all_rows_when_all_available_qualify(self) -> None:
+        model = TournamentModel.from_config(_simple_group_config())
+        rows = {
+            "A": (
+                _standing("A", "A1", 6, 2, 2),
+                _standing("A", "A2", 3, 0, 1),
+                _standing("A", "A3", 0, -2, 0),
+            )
+        }
+
+        qualifiers = best_third_place_qualifiers(model, rows)
+
+        self.assertEqual(qualifiers, ("A3",))
 
 
 class ScoringTests(unittest.TestCase):
@@ -373,6 +508,64 @@ class ResultSyncMappingTests(unittest.TestCase):
         self.assertNotIn("R16-1", {result.match_id for result in stored})
         self.assertIn("ko-r16-1", skipped)
 
+    def test_unresolved_group_tie_keeps_group_results_and_skips_knockout(self) -> None:
+        config = _simple_group_config()
+        group_results = [
+            _group_result("A-1", "A", "A1", "A2", 0, 0),
+            _group_result("A-2", "A", "A1", "A3", 0, 0),
+            _group_result("A-3", "A", "A2", "A3", 0, 0),
+        ]
+        config["fixtures"] = [
+            {
+                "id": result.match_id,
+                "provider_match_id": result.match_id,
+                "stage": "group",
+                "group_id": result.group_id,
+                "home_team_id": result.home_team_id,
+                "away_team_id": result.away_team_id,
+            }
+            for result in group_results
+        ]
+        config["knockout_fixtures"] = [
+            {
+                "id": "R32-1",
+                "stage": "knockout",
+                "round_name": "round_of_32",
+                "provider_match_id": "ko-1",
+            }
+        ]
+        live_results = [
+            LiveMatchResult(
+                provider_match_id=result.match_id,
+                status="FINISHED",
+                home_score=result.home_score,
+                away_score=result.away_score,
+                played_at=None,
+            )
+            for result in group_results
+        ]
+        live_results.append(
+            LiveMatchResult(
+                provider_match_id="ko-1",
+                status="FINISHED",
+                home_score=1,
+                away_score=0,
+                played_at=None,
+            )
+        )
+
+        stored, skipped = _map_live_results(
+            provider_name="fifa_public_calendar",
+            tournament_config=config,
+            live_results=live_results,
+        )
+
+        self.assertEqual(
+            {result.match_id for result in stored},
+            {"A-1", "A-2", "A-3"},
+        )
+        self.assertEqual(skipped, ["ko-1"])
+
 
 class ResultSyncServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_unsupported_provider_raises_service_error_before_sync_run(self) -> None:
@@ -436,7 +629,7 @@ def _complete_home_winner_prediction(model: TournamentModel) -> dict[str, object
 
 def _group_results_for_rankings(model: TournamentModel) -> list[MatchResult]:
     results: list[MatchResult] = []
-    for group in model.groups:
+    for group_index, group in enumerate(model.groups):
         first, second, third = group.team_ids
         results.extend(
             [
@@ -457,7 +650,7 @@ def _group_results_for_rankings(model: TournamentModel) -> list[MatchResult]:
                     home_team_id=first,
                     away_team_id=third,
                     status="FINISHED",
-                    home_score=2,
+                    home_score=group_index + 1,
                     away_score=0,
                 ),
                 MatchResult(
@@ -467,12 +660,52 @@ def _group_results_for_rankings(model: TournamentModel) -> list[MatchResult]:
                     home_team_id=second,
                     away_team_id=third,
                     status="FINISHED",
-                    home_score=2,
+                    home_score=1,
                     away_score=0,
                 ),
             ]
         )
     return results
+
+
+def _group_result(
+    match_id: str,
+    group_id: str,
+    home_team_id: str,
+    away_team_id: str,
+    home_score: int,
+    away_score: int,
+) -> MatchResult:
+    return MatchResult(
+        match_id=match_id,
+        stage="group",
+        group_id=group_id,
+        home_team_id=home_team_id,
+        away_team_id=away_team_id,
+        status="FINISHED",
+        home_score=home_score,
+        away_score=away_score,
+    )
+
+
+def _standing(
+    group_id: str,
+    team_id: str,
+    points: int,
+    goal_difference: int,
+    goals_for: int,
+) -> TeamStanding:
+    return TeamStanding(
+        group_id=group_id,
+        team_id=team_id,
+        played=3,
+        wins=0,
+        draws=0,
+        losses=0,
+        goals_for=goals_for,
+        goals_against=goals_for - goal_difference,
+        points=points,
+    )
 
 
 def _knockout_results_from_prediction(
@@ -554,4 +787,61 @@ def _prediction_config() -> dict[str, object]:
                 }
             ]
         },
+    }
+
+
+def _simple_group_config() -> dict[str, object]:
+    return {
+        "schema_version": "test",
+        "tournament": {"id": "simple", "name": "Simple Cup"},
+        "format": {
+            "group_count": 1,
+            "teams_per_group": 3,
+            "third_place_qualifiers": 1,
+            "opening_knockout_matches": 1,
+        },
+        "teams": [
+            {"id": "A1", "name": "Team A1"},
+            {"id": "A2", "name": "Team A2"},
+            {"id": "A3", "name": "Team A3"},
+        ],
+        "groups": [
+            {
+                "id": "A",
+                "label": "Group A",
+                "team_ids": ["A1", "A2", "A3"],
+            }
+        ],
+        "fixtures": [],
+        "bracket": {"round_of_32": []},
+        "third_place_allocation": {"rules": []},
+    }
+
+
+def _four_team_group_config() -> dict[str, object]:
+    return {
+        "schema_version": "test",
+        "tournament": {"id": "simple", "name": "Simple Cup"},
+        "format": {
+            "group_count": 1,
+            "teams_per_group": 4,
+            "third_place_qualifiers": 1,
+            "opening_knockout_matches": 1,
+        },
+        "teams": [
+            {"id": "A1", "name": "Team A1"},
+            {"id": "A2", "name": "Team A2"},
+            {"id": "A3", "name": "Team A3"},
+            {"id": "A4", "name": "Team A4"},
+        ],
+        "groups": [
+            {
+                "id": "A",
+                "label": "Group A",
+                "team_ids": ["A1", "A2", "A3", "A4"],
+            }
+        ],
+        "fixtures": [],
+        "bracket": {"round_of_32": []},
+        "third_place_allocation": {"rules": []},
     }
