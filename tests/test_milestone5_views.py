@@ -22,9 +22,13 @@ from world_cup_bot.domain.predictions import (
 )
 from world_cup_bot.services.leaderboard_service import RankedScore, leaderboard_row_text
 from world_cup_bot.services.prediction_view_service import (
+    GroupRenderRow,
+    GroupRenderSection,
+    GroupSheetRenderModel,
     PredictionSnapshot,
     PredictionViewService,
     PredictionViewServiceError,
+    RenderStatus,
     bracket_render_model,
     group_sheet_render_model,
 )
@@ -59,6 +63,7 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         group_a = render_model.groups[0]
         self.assertEqual(group_a.rows[0].status.state, "correct")
+        self.assertEqual(group_a.rows[0].flag_code, "A1")
         self.assertEqual(group_a.rows[1].status.state, "correct")
         self.assertEqual(group_a.rows[2].third_place_status.state, "pending")
 
@@ -109,6 +114,44 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(groups_png.startswith(b"\x89PNG"))
         self.assertTrue(bracket_png.startswith(b"\x89PNG"))
+
+    def test_group_renderer_draws_flag_asset_when_svg_renderer_is_available(self) -> None:
+        if not PIL_AVAILABLE:
+            self.skipTest("Pillow is not installed in this Python environment.")
+        try:
+            import cairosvg  # noqa: F401
+        except Exception as exc:
+            self.skipTest(f"CairoSVG is not usable in this Python environment: {exc}")
+
+        from io import BytesIO
+
+        from PIL import Image
+
+        from world_cup_bot.ui.image_renderer import render_groups_png
+
+        render_model = GroupSheetRenderModel(
+            title="Flag test",
+            subtitle="Test Cup",
+            meta=("Open",),
+            groups=(
+                GroupRenderSection(
+                    label="Group A",
+                    rows=(
+                        GroupRenderRow(
+                            position=1,
+                            team_name="USA",
+                            flag_code="USA",
+                            status=RenderStatus(label="OK", state="correct"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        image = Image.open(BytesIO(render_groups_png(render_model))).convert("RGB")
+
+        self.assertEqual(image.size, (1800, 448))
+        self.assertNotEqual(image.getpixel((110, 220)), (32, 38, 49))
 
     def test_leaderboard_row_includes_champion_pick(self) -> None:
         ranked = RankedScore(
@@ -390,7 +433,11 @@ def _actual_data_with_partial_round_of_32(
 def _prediction_config() -> dict[str, object]:
     group_ids = list("ABCDEFGHIJKL")
     teams = [
-        {"id": f"{group_id}{position}", "name": f"Team {group_id}{position}"}
+        {
+            "id": f"{group_id}{position}",
+            "name": f"Team {group_id}{position}",
+            "country_code": f"{group_id}{position}",
+        }
         for group_id in group_ids
         for position in range(1, 4)
     ]

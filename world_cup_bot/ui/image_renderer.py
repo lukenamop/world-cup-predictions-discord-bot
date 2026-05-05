@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -20,6 +22,7 @@ CORRECT = "#3fbf7f"
 INCORRECT = "#e05d5d"
 PENDING = "#8d98a8"
 ACCENT = "#5b8def"
+FLAG_DIR = Path(__file__).resolve().parents[2] / "assets" / "flags"
 
 
 def render_groups_png(model: GroupSheetRenderModel) -> bytes:
@@ -47,11 +50,15 @@ def render_groups_png(model: GroupSheetRenderModel) -> bytes:
         line_y = y + 62
         for item in group.rows:
             status_color = _status_color(item.status)
-            draw.text(
-                (x + 20, line_y),
-                f"{item.position}. {item.team_name}",
-                fill=TEXT,
-                font=fonts["body"],
+            draw.text((x + 20, line_y), f"{item.position}.", fill=MUTED, font=fonts["body"])
+            _draw_team(
+                image,
+                draw,
+                x + 58,
+                line_y,
+                _fit(item.team_name, 15),
+                item.flag_code,
+                fonts["body"],
             )
             _pill(draw, x + 292, line_y - 3, item.status.label, status_color, fonts["small"])
             if item.third_place_status is not None:
@@ -89,17 +96,25 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
         for row, match in enumerate(matches):
             y = header_height + row * row_height
             _rounded_rect(draw, (x, y, x + column_width, y + row_height - 12), PANEL)
-            draw.text(
-                (x + 14, y + 12),
-                _fit(f"{match.home_team_name} vs {match.away_team_name}", 29),
-                fill=MUTED,
-                font=fonts["small"],
+            _draw_team_pair(
+                image,
+                draw,
+                x + 14,
+                y + 12,
+                match.home_team_name,
+                match.home_flag_code,
+                match.away_team_name,
+                match.away_flag_code,
+                fonts["small"],
             )
-            draw.text(
-                (x + 14, y + 38),
-                _fit(match.winner_team_name, 22),
-                fill=TEXT,
-                font=fonts["body"],
+            _draw_team(
+                image,
+                draw,
+                x + 14,
+                y + 38,
+                _fit(match.winner_team_name, 14),
+                match.winner_flag_code,
+                fonts["body"],
             )
             _pill(
                 draw,
@@ -148,6 +163,59 @@ def _pill(
     draw.text((x + 24, y + 14), label, fill="#ffffff", font=font, anchor="mm")
 
 
+def _draw_team(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    name: str,
+    flag_code: str | None,
+    font: ImageFont.ImageFont,
+    *,
+    fill: str = TEXT,
+) -> None:
+    flag = _flag_image(flag_code, width=28, height=20)
+    text_x = x
+    if flag is not None:
+        image.paste(flag, (x, y + 3), flag)
+        text_x += 36
+    draw.text((text_x, y), name, fill=fill, font=font)
+
+
+def _draw_team_pair(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    home_name: str,
+    home_flag_code: str | None,
+    away_name: str,
+    away_flag_code: str | None,
+    font: ImageFont.ImageFont,
+) -> None:
+    _draw_team(
+        image,
+        draw,
+        x,
+        y,
+        _fit(home_name, 9),
+        home_flag_code,
+        font,
+        fill=MUTED,
+    )
+    draw.text((x + 116, y), "vs", fill=MUTED, font=font)
+    _draw_team(
+        image,
+        draw,
+        x + 146,
+        y,
+        _fit(away_name, 9),
+        away_flag_code,
+        font,
+        fill=MUTED,
+    )
+
+
 def _rounded_rect(
     draw: ImageDraw.ImageDraw,
     box: tuple[int, int, int, int],
@@ -162,6 +230,36 @@ def _status_color(status: RenderStatus) -> str:
     if status.state == "incorrect":
         return INCORRECT
     return PENDING
+
+
+@lru_cache(maxsize=96)
+def _flag_image(
+    flag_code: str | None,
+    *,
+    width: int,
+    height: int,
+) -> Image.Image | None:
+    if not flag_code:
+        return None
+    path = FLAG_DIR / f"{flag_code.upper()}.svg"
+    if not path.exists():
+        return None
+    try:
+        import cairosvg
+    except Exception:
+        return None
+
+    try:
+        png = cairosvg.svg2png(
+            url=str(path),
+            output_width=width,
+            output_height=height,
+        )
+    except Exception:
+        return None
+    if not png:
+        return None
+    return Image.open(BytesIO(png)).convert("RGBA")
 
 
 def _fonts() -> dict[str, ImageFont.ImageFont]:

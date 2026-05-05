@@ -14,6 +14,7 @@ from world_cup_bot.domain.predictions import (
     record_group_pick,
     record_knockout_winner,
     record_third_place_qualifiers,
+    undo_last_prediction_step,
 )
 from world_cup_bot.services.prediction_service import (
     PredictionService,
@@ -230,6 +231,74 @@ class PredictionFlowTests(unittest.TestCase):
                 now_utc=datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc),
             )
         )
+
+    def test_previous_from_third_place_step_removes_last_group_pick(self) -> None:
+        model = TournamentModel.from_config(_prediction_config())
+        data = empty_prediction_data()
+        for _ in range(len(model.groups) * model.format.teams_per_group):
+            step = next_prediction_step(model, data)
+            data = record_group_pick(
+                model,
+                data,
+                group_id=step.group_id or "",
+                team_id=step.options[0].id,
+            )
+
+        undone = undo_last_prediction_step(model, data)
+        step = next_prediction_step(model, undone)
+
+        self.assertEqual(step.kind, "group_pick")
+        self.assertEqual(step.group_id, "L")
+        self.assertEqual(step.rank_position, 3)
+        self.assertEqual(undone["third_place_qualifier_team_ids"], [])
+        self.assertEqual(undone["knockout"], {})
+
+    def test_previous_from_knockout_clears_dependent_future_rounds(self) -> None:
+        model = TournamentModel.from_config(_prediction_config())
+        data = empty_prediction_data()
+        while True:
+            step = next_prediction_step(model, data)
+            if step.kind == "knockout" and step.round_name == "quarter_finals":
+                break
+            if step.kind == "group_pick":
+                data = record_group_pick(
+                    model,
+                    data,
+                    group_id=step.group_id or "",
+                    team_id=step.options[0].id,
+                )
+            elif step.kind == "third_place":
+                data = record_third_place_qualifiers(
+                    model,
+                    data,
+                    team_ids=[team.id for team in step.options[: step.max_values]],
+                )
+            elif step.kind == "knockout":
+                data = record_knockout_winner(
+                    model,
+                    data,
+                    round_name=step.round_name or "",
+                    match_id=step.match_id or "",
+                    winner_team_id=step.options[0].id,
+                )
+
+        undone = undo_last_prediction_step(model, data)
+        knockout = undone["knockout"]
+
+        self.assertEqual(len(knockout["round_of_32"]), 16)
+        self.assertEqual(len(knockout["round_of_16"]), 7)
+        self.assertNotIn("quarter_finals", knockout)
+        self.assertEqual(next_prediction_step(model, undone).round_name, "round_of_16")
+
+    def test_previous_from_review_removes_final_pick(self) -> None:
+        model = TournamentModel.from_config(_prediction_config())
+        data = _completed_prediction_data(model)
+
+        undone = undo_last_prediction_step(model, data)
+        step = next_prediction_step(model, undone)
+
+        self.assertEqual(step.kind, "knockout")
+        self.assertEqual(step.round_name, "final")
 
 
 def _prediction_config() -> dict[str, object]:

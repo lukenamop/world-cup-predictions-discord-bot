@@ -444,9 +444,9 @@ class AdminCog(commands.Cog):
 
         guild_id = _guild_id(ctx)
         normalized = kind.strip().lower()
-        if normalized not in {"leaderboard", "rules", "lock", "status"}:
+        if normalized not in {"leaderboard", "rules", "lock", "status", "reminder"}:
             await ctx.respond(
-                "Post kind must be one of: leaderboard, rules, lock, status.",
+                "Post kind must be one of: leaderboard, rules, lock, status, reminder.",
                 ephemeral=True,
             )
             return
@@ -559,6 +559,8 @@ class AdminCog(commands.Cog):
             return _rules_embed(settings=settings, tournament=tournament)
         if kind == "lock":
             return _lock_embed(settings=settings)
+        if kind == "reminder":
+            return _reminder_embed(settings=settings, tournament=tournament)
         if kind == "status":
             return _status_embed(
                 settings=settings,
@@ -567,7 +569,7 @@ class AdminCog(commands.Cog):
                 default_provider=self.bot.settings.live_results_provider,
                 command_sync_status=self.bot.command_sync_status,
             )
-        raise ValueError("Post kind must be one of: leaderboard, rules, lock, status.")
+        raise ValueError("Post kind must be one of: leaderboard, rules, lock, status, reminder.")
 
     async def _ensure_admin(self, ctx: discord.ApplicationContext) -> bool:
         if ctx.guild is None:
@@ -1065,6 +1067,47 @@ def _lock_embed(*, settings: object) -> discord.Embed:
             else "First tournament kickoff"
         ),
         inline=True,
+    )
+    return embed
+
+
+def _reminder_embed(*, settings: object, tournament: object) -> discord.Embed:
+    predictions_open = bool(settings and settings.predictions_open)
+    embed = discord.Embed(
+        title="Prediction reminder",
+        description=(
+            "World Cup predictions are open. Submit or edit your bracket before the lock."
+            if predictions_open
+            else "Prediction entry is currently closed. Watch this channel for updates."
+        ),
+        color=discord.Color.gold(),
+    )
+    embed.add_field(
+        name="Tournament",
+        value=tournament.tournament_name if tournament is not None else "Not configured",
+        inline=False,
+    )
+    embed.add_field(
+        name="Status",
+        value="Open" if predictions_open else "Closed",
+        inline=True,
+    )
+    embed.add_field(
+        name="Deadline",
+        value=(
+            _format_lock_deadline_with_local(
+                settings.lock_deadline_utc,
+                settings.timezone,
+            )
+            if settings
+            else "First tournament kickoff"
+        ),
+        inline=True,
+    )
+    embed.add_field(
+        name="Commands",
+        value="Use `/predict` to submit. Use `/edit` to replace a submitted bracket before lock.",
+        inline=False,
     )
     return embed
 

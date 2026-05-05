@@ -195,6 +195,21 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         self.assertEqual(rules["champion"], 30)
         self.assertEqual(rules["runner_up"], 15)
 
+    def test_reminder_embed_includes_deadline_and_prediction_commands(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+        settings = types.SimpleNamespace(
+            predictions_open=True,
+            lock_deadline_utc=datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc),
+            timezone="America/New_York",
+        )
+        tournament = types.SimpleNamespace(tournament_name="Test Cup")
+
+        embed = admin_module._reminder_embed(settings=settings, tournament=tournament)
+
+        self.assertEqual(embed.title, "Prediction reminder")
+        self.assertIn("/predict", _field_value(embed, "Commands"))
+        self.assertIn("2026-06-11 14:00", _field_value(embed, "Deadline"))
+
 
 class _FakeContext:
     def __init__(
@@ -231,6 +246,8 @@ def _load_admin_module_with_fake_discord() -> types.ModuleType:
     previous_modules = {name: sys.modules.get(name) for name in module_names}
 
     discord = types.ModuleType("discord")
+    discord.Color = _FakeColor
+    discord.Embed = _FakeEmbed
     discord.Permissions = _FakePermissions
     discord.SlashCommandGroup = _FakeSlashCommandGroup
     discord.ApplicationContext = object
@@ -306,6 +323,50 @@ def _load_operator_module_with_fake_discord() -> types.ModuleType:
 class _FakePermissions:
     def __init__(self, *, manage_guild: bool = False) -> None:
         self.manage_guild = manage_guild
+
+
+class _FakeColor:
+    @staticmethod
+    def green() -> str:
+        return "green"
+
+    @staticmethod
+    def blurple() -> str:
+        return "blurple"
+
+    @staticmethod
+    def gold() -> str:
+        return "gold"
+
+
+class _FakeEmbed:
+    def __init__(
+        self,
+        *,
+        title: str | None = None,
+        description: str | None = None,
+        color: object | None = None,
+    ) -> None:
+        self.title = title
+        self.description = description
+        self.color = color
+        self.fields: list[types.SimpleNamespace] = []
+        self.footer: str | None = None
+
+    def add_field(self, *, name: str, value: object, inline: bool = True) -> None:
+        self.fields.append(
+            types.SimpleNamespace(name=name, value=str(value), inline=inline)
+        )
+
+    def set_footer(self, *, text: str) -> None:
+        self.footer = text
+
+
+def _field_value(embed: _FakeEmbed, name: str) -> str:
+    for field in embed.fields:
+        if field.name == name:
+            return field.value
+    raise AssertionError(f"Missing embed field: {name}")
 
 
 class _FakeSlashCommandGroup:

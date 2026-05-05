@@ -19,6 +19,7 @@ from world_cup_bot.domain.predictions import (
     record_knockout_winner,
     record_third_place_qualifiers,
     restart_prediction_data,
+    undo_last_prediction_step,
 )
 from world_cup_bot.services.prediction_service import (
     PredictionService,
@@ -241,6 +242,8 @@ class PredictionEntryView(discord.ui.View):
         super().__init__(timeout=15 * 60)
         self.session = session
         self.notice: str | None = None
+        self.pending_values: list[str] = []
+        self.finished = False
         self._refresh_items()
 
     def build_embed(self) -> discord.Embed:
@@ -288,6 +291,12 @@ class PredictionEntryView(discord.ui.View):
                 value="\n".join(team.short_name for team in step.options)[:1024],
                 inline=False,
             )
+        if step.kind != "submit" and self.pending_values:
+            embed.add_field(
+                name="Pending selection",
+                value=_format_pending_selection(step, self.pending_values),
+                inline=False,
+            )
         return embed
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -301,12 +310,16 @@ class PredictionEntryView(discord.ui.View):
 
     def _refresh_items(self) -> None:
         self.clear_items()
+        if self.finished:
+            return
         step = next_prediction_step(self.session.model, self.session.data)
+        progress = prediction_progress(self.session.model, self.session.data)
         if step.kind != "submit":
             select = discord.ui.Select(
                 placeholder=step.title[:100],
                 min_values=step.min_values,
                 max_values=step.max_values,
+                row=0,
                 options=[
                     discord.SelectOption(
                         label=team.short_name[:100],
@@ -322,17 +335,46 @@ class PredictionEntryView(discord.ui.View):
             select.callback = select_callback
             self.add_item(select)
 
+        previous_button = discord.ui.Button(
+            label="Previous",
+            style=discord.ButtonStyle.secondary,
+            disabled=progress.completed <= 0,
+            row=1,
+        )
+        previous_button.callback = self._previous_callback
+        self.add_item(previous_button)
+
+        if step.kind != "submit":
+            next_button = discord.ui.Button(
+                label="Next",
+                style=discord.ButtonStyle.primary,
+                disabled=not self.pending_values,
+                row=1,
+            )
+            next_button.callback = self._next_callback
+            self.add_item(next_button)
+
         restart_button = discord.ui.Button(
             label="Start over",
             style=discord.ButtonStyle.danger,
+            row=1,
         )
         restart_button.callback = self._restart_callback
         self.add_item(restart_button)
 
+        cancel_button = discord.ui.Button(
+            label="Cancel",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        cancel_button.callback = self._cancel_callback
+        self.add_item(cancel_button)
+
         if step.kind == "submit":
             submit_button = discord.ui.Button(
-                label="Submit prediction",
+                label="Confirm submission",
                 style=discord.ButtonStyle.success,
+                row=1,
             )
             submit_button.callback = self._submit_callback
             self.add_item(submit_button)
@@ -342,24 +384,55 @@ class PredictionEntryView(discord.ui.View):
         interaction: discord.Interaction,
         select: discord.ui.Select,
     ) -> None:
+        self.pending_values = [str(value) for value in select.values]
+        self.notice = "Selection ready. Press Next to record it."
+        await self._edit(interaction)
+
+    async def _next_callback(self, interaction: discord.Interaction) -> None:
+        if not self.pending_values:
+            self.notice = "Choose an option before moving forward."
+            await self._edit(interaction)
+            return
         step = next_prediction_step(self.session.model, self.session.data)
-        values = [str(value) for value in select.values]
         try:
-            self.session.data = self._apply_step(step, values)
+            self.session.data = self._apply_step(step, self.pending_values)
+            self.pending_values = []
             self.notice = "Selection recorded."
+        except PredictionValidationError as exc:
+            self.notice = str(exc)
+        await self._edit(interaction)
+
+    async def _previous_callback(self, interaction: discord.Interaction) -> None:
+        self.pending_values = []
+        try:
+            self.session.data = undo_last_prediction_step(
+                self.session.model,
+                self.session.data,
+            )
+            self.notice = "Previous selection removed. Continue from here."
         except PredictionValidationError as exc:
             self.notice = str(exc)
         await self._edit(interaction)
 
     async def _restart_callback(self, interaction: discord.Interaction) -> None:
         self.session.data = restart_prediction_data()
+        self.pending_values = []
         self.notice = "Prediction entry restarted. Nothing changes until you submit."
         await self._edit(interaction)
+
+    async def _cancel_callback(self, interaction: discord.Interaction) -> None:
+        self.pending_values = []
+        self.notice = "Prediction entry cancelled. No changes were submitted."
+        self.finished = True
+        self.clear_items()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        self.stop()
 
     async def _submit_callback(self, interaction: discord.Interaction) -> None:
         try:
             await self.session.submit()
             self.notice = "Prediction submitted."
+            self.finished = True
             self.clear_items()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
             self.stop()
@@ -426,6 +499,12 @@ def _format_summary(model: TournamentModel, data: dict[str, Any]) -> str:
         f"Third place: {model.team(summary.third_place_team_id).short_name}\n"
         f"Fourth place: {model.team(summary.fourth_place_team_id).short_name}"
     )
+
+
+def _format_pending_selection(step: PredictionStep, values: list[str]) -> str:
+    teams = {team.id: team.short_name for team in step.options}
+    selected = [teams.get(value, value) for value in values]
+    return "\n".join(selected)[:1024] or "No pending selection."
 
 
 def _format_deadline(deadline: datetime | None) -> str:

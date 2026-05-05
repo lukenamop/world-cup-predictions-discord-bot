@@ -72,6 +72,7 @@ class RenderStatus:
 class GroupRenderRow:
     position: int
     team_name: str
+    flag_code: str | None
     status: RenderStatus
     third_place_status: RenderStatus | None = None
 
@@ -95,8 +96,11 @@ class BracketRenderMatch:
     round_label: str
     match_id: str
     home_team_name: str
+    home_flag_code: str | None
     away_team_name: str
+    away_flag_code: str | None
     winner_team_name: str
+    winner_flag_code: str | None
     status: RenderStatus
 
 
@@ -296,6 +300,7 @@ def group_sheet_render_model(
                 GroupRenderRow(
                     position=index,
                     team_name=snapshot.model.team(team_id).short_name,
+                    flag_code=snapshot.model.team(team_id).country_code,
                     status=status,
                     third_place_status=third_status,
                 )
@@ -331,8 +336,11 @@ def bracket_render_model(
                     round_label=ROUND_LABELS[round_name],
                     match_id=match.id,
                     home_team_name=snapshot.model.team(match.home_team_id).short_name,
+                    home_flag_code=snapshot.model.team(match.home_team_id).country_code,
                     away_team_name=snapshot.model.team(match.away_team_id).short_name,
+                    away_flag_code=snapshot.model.team(match.away_team_id).country_code,
                     winner_team_name=snapshot.model.team(match.winner_team_id).short_name,
+                    winner_flag_code=snapshot.model.team(match.winner_team_id).country_code,
                     status=status,
                 )
             )

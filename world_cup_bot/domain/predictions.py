@@ -34,6 +34,7 @@ class Team:
     id: str
     name: str
     short_name: str
+    country_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,11 @@ class TournamentModel:
                 id=str(raw_team["id"]),
                 name=str(raw_team["name"]),
                 short_name=str(raw_team.get("short_name") or raw_team["name"]),
+                country_code=(
+                    str(raw_team["country_code"])
+                    if raw_team.get("country_code")
+                    else None
+                ),
             )
             for raw_team in _mappings(config.get("teams"))
         )
@@ -170,6 +176,44 @@ def empty_prediction_data() -> dict[str, Any]:
 
 def restart_prediction_data() -> dict[str, Any]:
     return empty_prediction_data()
+
+
+def undo_last_prediction_step(
+    model: TournamentModel,
+    data: Mapping[str, Any],
+) -> dict[str, Any]:
+    updated = _copy_data(data)
+    knockout = _knockout(updated)
+    for round_name in reversed(ROUND_ORDER):
+        entries = list(_round_entries(updated, round_name))
+        if not entries:
+            continue
+        entries.pop()
+        if entries:
+            knockout[round_name] = [dict(entry) for entry in entries]
+        else:
+            knockout.pop(round_name, None)
+        _clear_after_round(updated, round_name)
+        return updated
+
+    if _third_place_team_ids(updated):
+        _clear_after_groups(updated)
+        return updated
+
+    rankings = _group_rankings(updated)
+    for group in reversed(model.groups):
+        ranking = list(rankings.get(group.id, []))
+        if not ranking:
+            continue
+        ranking.pop()
+        if ranking:
+            rankings[group.id] = ranking
+        else:
+            rankings.pop(group.id, None)
+        _clear_after_groups(updated)
+        return updated
+
+    raise PredictionValidationError("There is no previous prediction step yet.")
 
 
 def record_group_pick(

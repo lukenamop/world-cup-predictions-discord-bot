@@ -1,6 +1,6 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 8 work from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, canonical 2026 World Cup tournament configuration, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images, preferences, guided admin setup/configuration, operator sync, admin posting, exports, and backups.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 10 work from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, canonical 2026 World Cup tournament configuration, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images with flags, preferences, guided admin setup/configuration, operator sync, admin posting and reminders, exports, and backups.
 
 ## Current Command Surface
 
@@ -22,7 +22,7 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/admin close` closes prediction entry without changing the lock deadline.
 - `/admin lock [deadline_utc] [clear]` sets or clears the full-bracket lock deadline. Use ISO-8601 UTC timestamps such as `2026-06-11T18:00:00Z`.
 - `/admin recalc` recalculates submitted prediction scores from stored results.
-- `/admin post [kind] [channel]` posts `leaderboard`, `rules`, `lock`, or `status` snapshots to configured channels by default, or to an explicit override channel.
+- `/admin post [kind] [channel]` posts `leaderboard`, `rules`, `lock`, `status`, or `reminder` snapshots to configured channels by default, or to an explicit override channel.
 - `/admin export` returns a JSON export of submitted predictions and current scores.
 - `/admin backup` returns an operator-friendly JSON backup of league settings, active tournament config, predictions, scores, stored results, and recent sync runs.
 - `/operator sync` runs one global live-result sync for all configured guilds. It is registered only in `OPERATOR_GUILD_ID` and requires Discord Administrator permission or an ID listed in `OWNER_USER_IDS`.
@@ -36,11 +36,15 @@ Install PostgreSQL and create the local database/user:
 
 ```bash
 sudo apt update
-sudo apt install postgresql postgresql-contrib
+sudo apt install postgresql postgresql-contrib libcairo2
 sudo -u postgres createuser --createdb world_cup_bot
 sudo -u postgres createdb --owner=world_cup_bot world_cup_bot
 sudo -u postgres psql -c "ALTER USER world_cup_bot WITH PASSWORD 'change-me-local-only';"
 ```
+
+`libcairo2` supports CairoSVG rasterization of checked-in SVG flag assets for
+generated prediction images. On macOS, install the equivalent native Cairo
+library with `brew install cairo` before running image-rendering tests locally.
 
 Use this local connection string:
 
@@ -150,7 +154,7 @@ python scripts/validate_tournament.py config/tournaments/2026_world_cup.json
 Prediction entry is private and submit-based:
 
 - Admins run `/admin setup`, then run `/admin open`.
-- `/predict` walks members through group ranking, predicted advancing third-place teams, and knockout winners.
+- `/predict` walks members through group ranking, predicted advancing third-place teams, and knockout winners with private Previous, Next, Start over, Cancel, and final confirmation controls.
 - Group ranking is captured one position at a time so ordering is explicit.
 - The Round of 32 is seeded automatically from group predictions, selected third-place qualifiers, and the imported allocation table.
 - Completing `/predict` submits the bracket. There is no supported user-facing saved draft workflow.
@@ -167,7 +171,7 @@ Full brackets are private by default. A member can opt in to sharing full group 
 /preferences share_full_bracket:True
 ```
 
-Champion, runner-up, third-place picks, and available point totals remain visible through `/prediction [user]`. The generated `/groups` and `/bracket` images include accessible embed summaries and use explicit `OK`, `X`, and `...` status labels alongside colors so correctness does not rely on color alone.
+Champion, runner-up, third-place picks, and available point totals remain visible through `/prediction [user]`. The generated `/groups` and `/bracket` images include accessible embed summaries, render checked-in flag SVG assets with CairoSVG/Pillow, and use explicit `OK`, `X`, and `...` status labels alongside colors so correctness does not rely on color alone.
 
 ## Results And Scoring
 
@@ -220,13 +224,14 @@ Use `/admin config` with no options to view current settings. Pass only the opti
 
 ## Admin Posting, Export, And Backup
 
-Admins can post snapshots without manually composing announcements. Leaderboards default to the configured leaderboard channel; rules, lock, and status posts default to the configured prediction announcement channel. Pass `channel:` to override the default destination.
+Admins can post snapshots without manually composing announcements. Leaderboards default to the configured leaderboard channel; rules, lock, status, and reminder posts default to the configured prediction announcement channel. Pass `channel:` to override the default destination.
 
 ```text
 /admin post kind:leaderboard
 /admin post kind:rules channel:#predictions
 /admin post kind:lock
 /admin post kind:status
+/admin post kind:reminder
 ```
 
 Prediction exports and backups are returned as ephemeral JSON attachments and write audit log rows:
