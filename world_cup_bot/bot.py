@@ -11,7 +11,7 @@ from world_cup_bot.settings import AppSettings, SettingsError
 
 
 LOGGER = logging.getLogger(__name__)
-COGS = ("world_cup_bot.cogs.foundation",)
+COGS = ("world_cup_bot.cogs.foundation", "world_cup_bot.cogs.admin")
 
 
 async def run_bot() -> None:

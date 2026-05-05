@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/world-cup-bot/tournament.schema.json",
+  "title": "World Cup Bot Tournament Config",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "tournament",
+    "teams",
+    "groups",
+    "fixtures",
+    "bracket",
+    "third_place_allocation"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "minLength": 1 },
+    "tournament": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "host": { "type": "string" },
+        "start_date": { "type": "string" },
+        "end_date": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "format": {
+      "type": "object",
+      "properties": {
+        "group_count": { "type": "integer", "minimum": 1, "default": 12 },
+        "teams_per_group": { "type": "integer", "minimum": 1, "default": 4 },
+        "third_place_qualifiers": { "type": "integer", "minimum": 1, "default": 8 },
+        "opening_knockout_matches": { "type": "integer", "minimum": 1, "default": 16 }
+      },
+      "additionalProperties": false
+    },
+    "teams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "country_code"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "short_name": { "type": "string" },
+          "country_code": { "type": "string", "minLength": 2, "maxLength": 3 },
+          "flag_asset": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "team_ids"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "team_ids": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "stage",
+          "group_id",
+          "home_team_id",
+          "away_team_id",
+          "kickoff_utc"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "stage": { "const": "group" },
+          "group_id": { "type": "string", "minLength": 1 },
+          "home_team_id": { "type": "string", "minLength": 1 },
+          "away_team_id": { "type": "string", "minLength": 1 },
+          "kickoff_utc": { "type": "string", "format": "date-time" },
+          "venue": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "bracket": {
+      "type": "object",
+      "required": ["round_of_32"],
+      "properties": {
+        "round_of_32": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "home_source", "away_source"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "home_source": { "$ref": "#/$defs/bracket_source" },
+              "away_source": { "$ref": "#/$defs/bracket_source" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "third_place_allocation": {
+      "type": "object",
+      "required": ["source", "source_version", "rules"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "source_version": { "type": "string", "minLength": 1 },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["qualifying_groups", "slot_assignments"],
+            "properties": {
+              "qualifying_groups": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "slot_assignments": {
+                "type": "object",
+                "additionalProperties": { "type": "string", "minLength": 1 }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "bracket_source": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["type", "group_id", "position"],
+          "properties": {
+            "type": { "const": "group_position" },
+            "group_id": { "type": "string", "minLength": 1 },
+            "position": { "type": "integer", "enum": [1, 2] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["type", "slot_id"],
+          "properties": {
+            "type": { "const": "third_place_slot" },
+            "slot_id": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

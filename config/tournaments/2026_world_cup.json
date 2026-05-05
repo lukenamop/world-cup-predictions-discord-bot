@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "tournament": {
+    "id": "fifa-world-cup-2026",
+    "name": "FIFA World Cup 2026",
+    "host": "Canada, Mexico, United States",
+    "start_date": "2026-06-11",
+    "end_date": "2026-07-19"
+  },
+  "format": {
+    "group_count": 12,
+    "teams_per_group": 4,
+    "third_place_qualifiers": 8,
+    "opening_knockout_matches": 16
+  },
+  "teams": [],
+  "groups": [],
+  "fixtures": [],
+  "bracket": {
+    "round_of_32": []
+  },
+  "third_place_allocation": {
+    "source": "Pending official local allocation table",
+    "source_version": "pending",
+    "rules": []
+  }
+}
