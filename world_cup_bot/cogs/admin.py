@@ -7,8 +7,18 @@ import discord
 from discord.ext import commands
 
 from world_cup_bot.data.repositories import (
+    AuditLogRepository,
     GuildSettingsRepository,
+    ResultRepository,
     TournamentConfigRepository,
+)
+from world_cup_bot.services.leaderboard_service import (
+    LeaderboardService,
+    LeaderboardServiceError,
+)
+from world_cup_bot.services.result_sync_service import (
+    ResultSyncService,
+    ResultSyncServiceError,
 )
 from world_cup_bot.services.tournament_import import (
     DEFAULT_TOURNAMENT_PATH,
@@ -260,6 +270,129 @@ class AdminCog(commands.Cog):
             summary=summary,
         )
         await ctx.respond(embed=embed, ephemeral=True)
+
+    @admin.command(
+        name="sync",
+        description="Show live result sync status or trigger a manual sync.",
+    )
+    async def sync_command(
+        self,
+        ctx: discord.ApplicationContext,
+        run: bool = False,
+    ) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        guild_id = _guild_id(ctx)
+        if not run:
+            latest = await ResultRepository(self.bot.database.pool).latest_sync_run(
+                guild_id=guild_id
+            )
+            if latest is None:
+                await ctx.respond("No result sync has run for this server yet.", ephemeral=True)
+                return
+            embed = discord.Embed(
+                title="Result sync status",
+                color=discord.Color.blurple(),
+            )
+            embed.add_field(name="Provider", value=latest.provider, inline=True)
+            embed.add_field(name="Status", value=latest.status, inline=True)
+            embed.add_field(
+                name="Finished",
+                value=(
+                    f"{latest.finished_at:%Y-%m-%d %H:%M UTC}"
+                    if latest.finished_at
+                    else "Still running"
+                ),
+                inline=True,
+            )
+            embed.add_field(
+                name="Matches",
+                value=(
+                    f"Fetched {latest.fetched_match_count}, "
+                    f"applied {latest.applied_match_count}, "
+                    f"warnings {latest.warning_count}"
+                ),
+                inline=False,
+            )
+            await ctx.respond(embed=embed, ephemeral=True)
+            return
+
+        await ctx.defer(ephemeral=True)
+        sync_service = ResultSyncService(
+            self.bot.database.pool,
+            provider_name=self.bot.settings.live_results_provider,
+            api_key=self.bot.settings.live_results_api_key,
+        )
+        try:
+            summary = await sync_service.sync_guild(guild_id=guild_id)
+            recalculation = await LeaderboardService(self.bot.database.pool).recalculate(
+                guild_id=guild_id
+            )
+            await AuditLogRepository(self.bot.database.pool).insert(
+                guild_id=guild_id,
+                actor_user_id=str(ctx.author.id),
+                action="manual_result_sync",
+                details={
+                    "sync_run_id": summary.sync_run.id,
+                    "tournament_config_id": summary.sync_run.tournament_config_id,
+                    "provider": summary.sync_run.provider,
+                    "fetched_match_count": summary.fetched_match_count,
+                    "applied_match_count": summary.applied_match_count,
+                    "skipped_match_count": summary.skipped_match_count,
+                    "scored_prediction_count": recalculation.scored_prediction_count,
+                    "scoring_version": recalculation.scoring_version,
+                },
+            )
+        except (ResultSyncServiceError, LeaderboardServiceError) as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        await ctx.respond(
+            (
+                "Result sync complete. "
+                f"Fetched {summary.fetched_match_count}, applied {summary.applied_match_count}, "
+                f"skipped {summary.skipped_match_count}. "
+                f"Recalculated {recalculation.scored_prediction_count} submitted prediction(s) "
+                f"with scoring {recalculation.scoring_version}."
+            ),
+            ephemeral=True,
+        )
+
+    @admin.command(name="recalc", description="Recalculate scores from stored results.")
+    async def recalc_command(self, ctx: discord.ApplicationContext) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        await ctx.defer(ephemeral=True)
+        try:
+            summary = await LeaderboardService(self.bot.database.pool).recalculate(
+                guild_id=_guild_id(ctx)
+            )
+            await AuditLogRepository(self.bot.database.pool).insert(
+                guild_id=_guild_id(ctx),
+                actor_user_id=str(ctx.author.id),
+                action="scores_recalculated",
+                details={
+                    "tournament_config_id": summary.tournament_config_id,
+                    "scored_prediction_count": summary.scored_prediction_count,
+                    "result_count": summary.result_count,
+                    "scoring_version": summary.scoring_version,
+                    "recalculated_at": summary.recalculated_at.isoformat(),
+                },
+            )
+        except LeaderboardServiceError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        await ctx.respond(
+            (
+                f"Recalculated {summary.scored_prediction_count} submitted prediction(s) "
+                f"from {summary.result_count} stored result(s) "
+                f"with scoring {summary.scoring_version}."
+            ),
+            ephemeral=True,
+        )
 
     async def _ensure_admin(self, ctx: discord.ApplicationContext) -> bool:
         if ctx.guild is None:

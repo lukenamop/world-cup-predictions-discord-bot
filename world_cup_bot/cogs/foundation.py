@@ -27,7 +27,11 @@ class FoundationCog(commands.Cog):
         )
         embed.add_field(
             name="Commands",
-            value="`/predict`, `/edit`, `/admin status`, `/admin import`, `/admin open`, `/admin close`, `/admin lock`",
+            value=(
+                "`/predict`, `/edit`, `/rank`, `/points`, `/admin status`, "
+                "`/admin import`, `/admin open`, `/admin close`, `/admin lock`, "
+                "`/admin sync`, `/admin recalc`"
+            ),
             inline=False,
         )
         await ctx.respond(embed=embed, ephemeral=True)

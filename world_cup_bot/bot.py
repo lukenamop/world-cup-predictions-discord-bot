@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from world_cup_bot.data.database import Database
+from world_cup_bot.jobs.result_sync import sync_all_active_guilds
 from world_cup_bot.logging import configure_logging
 from world_cup_bot.settings import AppSettings, SettingsError
 
@@ -15,6 +16,7 @@ COGS = (
     "world_cup_bot.cogs.foundation",
     "world_cup_bot.cogs.admin",
     "world_cup_bot.cogs.predictions",
+    "world_cup_bot.cogs.leaderboard",
 )
 
 
@@ -24,6 +26,7 @@ async def run_bot() -> None:
 
     try:
         import discord
+        from discord.ext import tasks
     except ImportError as exc:
         raise RuntimeError(
             "Pycord is not installed. Run `pip install -e .` inside the virtualenv."
@@ -37,6 +40,10 @@ async def run_bot() -> None:
 
     for cog in COGS:
         bot.load_extension(cog)
+
+    @tasks.loop(minutes=30)
+    async def result_sync_loop() -> None:
+        await sync_all_active_guilds(bot)
 
     @bot.event
     async def on_ready() -> None:
@@ -54,6 +61,12 @@ async def run_bot() -> None:
             len(bot.guilds),
             bot.command_sync_status,
         )
+        if (
+            settings.live_results_api_key
+            and not result_sync_loop.is_running()
+        ):
+            result_sync_loop.start()
+            LOGGER.info("Result sync job started; interval_minutes=30")
 
     @bot.event
     async def on_application_command_error(ctx: Any, error: Exception) -> None:

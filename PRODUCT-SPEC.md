@@ -148,10 +148,11 @@ Scoring is configurable per guild. Setup should offer these suggested defaults:
 - Correct group winner: 3 points.
 - Correct group runner-up: 2 points.
 - Correct group third-place qualifier: 1 point when the actual team was one of the user's 8 predicted advancing third-place teams.
-- Correct Round of 32 advancement: 2 points.
-- Correct Round of 16 advancement: 5 points.
-- Correct quarter-final advancement: 10 points.
-- Correct semi-final advancement: 15 points.
+- Correct Round of 32 advancement: 1 point.
+- Correct Round of 16 advancement: 2 points.
+- Correct quarter-final advancement: 5 points.
+- Correct semi-final advancement: 10 points.
+- Correct final advancement: 15 points.
 - Correct third-place winner: 10 points.
 - Correct champion: 25 points.
 - Correct runner-up: 15 points.

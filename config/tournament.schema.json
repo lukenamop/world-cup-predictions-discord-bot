@@ -86,6 +86,37 @@
           "home_team_id": { "type": "string", "minLength": 1 },
           "away_team_id": { "type": "string", "minLength": 1 },
           "kickoff_utc": { "type": "string", "format": "date-time" },
+          "provider_match_id": { "type": "string", "minLength": 1 },
+          "venue": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "knockout_fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "stage",
+          "round_name",
+          "provider_match_id"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "stage": { "const": "knockout" },
+          "round_name": {
+            "enum": [
+              "round_of_32",
+              "round_of_16",
+              "quarter_finals",
+              "semi_finals",
+              "third_place",
+              "final"
+            ]
+          },
+          "provider_match_id": { "type": "string", "minLength": 1 },
+          "kickoff_utc": { "type": "string", "format": "date-time" },
           "venue": { "type": "string" }
         },
         "additionalProperties": false

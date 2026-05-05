@@ -1,21 +1,25 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 3 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, admin setup status, and private prediction draft/submission flows.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 4 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, private prediction draft/submission flows, live result sync, scoring recalculation, ranks, and point breakdowns.
 
 ## Current Command Surface
 
 - `/help` confirms the bot is online and lists the current prediction commands.
 - `/predict` starts or resumes a private guided prediction draft.
 - `/edit` starts a private replacement draft for an already submitted prediction before lock. The last submitted bracket remains stored until the replacement draft is submitted.
+- `/rank [user]` shows a user's current shared rank and point totals after scores have been recalculated.
+- `/points [user]` shows a user's group/knockout point breakdown after scores have been recalculated.
 - `/admin status` shows setup status for the current server, including active tournament data.
 - `/admin import [path] [validate_only]` validates a tournament JSON file under `config/` and imports it for the current server when valid.
 - `/admin open` opens prediction entry.
 - `/admin close` closes prediction entry without changing the lock deadline.
 - `/admin lock [deadline_utc] [clear]` sets or clears the full-bracket lock deadline. Use ISO-8601 UTC timestamps such as `2026-06-11T18:00:00Z`.
+- `/admin sync [run]` shows the latest live result sync status, or triggers a manual sync when `run:True`.
+- `/admin recalc` recalculates submitted prediction scores from stored results.
 
 Admin commands require Discord Manage Server permission by default. Grant role or member overrides through Discord Server Settings > Integrations > Command Permissions.
 
-Scoring, leaderboards, generated visuals, and richer admin workflows are intentionally left for later milestones.
+Full leaderboard pagination, generated visuals, exports, backups, and richer admin workflows are intentionally left for later milestones.
 
 ## Ubuntu PostgreSQL Setup
 
@@ -115,6 +119,8 @@ Milestone 2 validation checks that a config has:
 - a Round of 32 bracket template with group-position and third-place slots;
 - a third-place allocation table covering every possible qualifying third-place group set.
 
+Group fixtures may include an optional `provider_match_id`. Knockout provider IDs live in optional `knockout_fixtures` entries with the generated match `id`, `round_name`, and `provider_match_id`. Live sync maps football-data.org match IDs to imported fixtures by `provider_match_id` first and by fixture `id` as a fallback. Store provider IDs as strings.
+
 For the 2026 default format, the third-place allocation table must contain all 495 combinations of 8 qualifying groups from 12 groups. The checked-in `config/tournaments/2026_world_cup.json` is an explicit placeholder and will fail validation until official teams, fixtures, bracket slots, and the local official allocation table are filled in.
 
 Validate a tournament file locally:
@@ -146,6 +152,26 @@ Prediction entry is private and draft-based:
 - Predictions lock at `/admin lock deadline_utc:...` when configured; otherwise the first imported fixture kickoff is used as the effective lock.
 
 Prediction storage uses `prediction_entries` for the latest draft/submission and `prediction_history` for revision history.
+
+## Results And Scoring
+
+Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `football_data_org`. For football-data.org, set `LIVE_RESULTS_API_KEY`; the bot calls the v4 competition matches endpoint for the tournament start year and stores any provider matches that map to imported fixture IDs.
+
+Manual sync:
+
+```text
+/admin sync run:True
+```
+
+The bot also starts a 30-minute background sync loop when `LIVE_RESULTS_API_KEY` is configured. Each sync writes `match_results` and `result_sync_runs`, then recalculates scores for submitted predictions.
+
+Manual recalculation without fetching new provider data:
+
+```text
+/admin recalc
+```
+
+Scoring uses the MVP defaults from `PRODUCT-SPEC.md`: group winner 3, group runner-up 2, third-place qualifier 1, Round of 32 1, Round of 16 2, quarter-final 5, semi-final 10, final 15, third-place winner 10, champion 25, and runner-up 15. Group winner/runner-up and best-third points are awarded only after the relevant group stage data is complete. Knockout points are team-advancement based: a user gets credit when a predicted team reaches the scored round, even if the exact path differs.
 
 ## PM2
 

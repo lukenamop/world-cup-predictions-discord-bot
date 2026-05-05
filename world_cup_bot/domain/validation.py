@@ -6,6 +6,7 @@ from itertools import combinations
 from math import comb
 from typing import Any, Mapping, Sequence
 
+from world_cup_bot.domain.predictions import ROUND_ORDER
 from world_cup_bot.domain.tournament import (
     DEFAULT_2026_FORMAT,
     TournamentFormat,
@@ -40,11 +41,18 @@ def validate_tournament_config(config: Mapping[str, Any]) -> TournamentValidatio
         tournament_format,
         errors,
     )
-    _validate_fixtures(fixtures, group_team_ids, errors)
+    fixture_provider_match_ids = _validate_fixtures(fixtures, group_team_ids, errors)
     third_place_slots, opening_knockout_matches = _validate_bracket(
         bracket,
         group_ids,
         tournament_format,
+        errors,
+    )
+    _validate_knockout_fixtures(
+        config.get("knockout_fixtures"),
+        bracket,
+        tournament_format,
+        fixture_provider_match_ids,
         errors,
     )
     source_version, allocation_rule_count = _validate_third_place_allocation(
@@ -196,8 +204,9 @@ def _validate_fixtures(
     fixtures: Sequence[object],
     group_team_ids: Mapping[str, list[str]],
     errors: list[str],
-) -> None:
+) -> list[str]:
     fixture_ids: list[str] = []
+    provider_match_ids: list[str] = []
     fixtures_by_group: dict[str, Counter[tuple[str, str]]] = {
         group_id: Counter() for group_id in group_team_ids
     }
@@ -215,11 +224,17 @@ def _validate_fixtures(
         home_team_id = _required_string(raw_fixture, "home_team_id", errors, parent=path)
         away_team_id = _required_string(raw_fixture, "away_team_id", errors, parent=path)
         kickoff_utc = _required_string(raw_fixture, "kickoff_utc", errors, parent=path)
+        provider_match_id = raw_fixture.get("provider_match_id")
 
         if kickoff_utc:
             _validate_utc_datetime(kickoff_utc, f"{path}.kickoff_utc", errors)
         if fixture_id:
             fixture_ids.append(fixture_id)
+        if provider_match_id is not None:
+            if not isinstance(provider_match_id, str) or not provider_match_id.strip():
+                errors.append(f"{path}.provider_match_id must be a non-empty string")
+            else:
+                provider_match_ids.append(provider_match_id.strip())
         if group_id not in group_team_ids:
             errors.append(f"{path}.group_id references unknown group: {group_id}")
             continue
@@ -239,6 +254,12 @@ def _validate_fixtures(
     duplicated_fixtures = _duplicates(fixture_ids)
     if duplicated_fixtures:
         errors.append("duplicate fixture ids: " + ", ".join(duplicated_fixtures))
+    duplicated_provider_matches = _duplicates(provider_match_ids)
+    if duplicated_provider_matches:
+        errors.append(
+            "duplicate fixture provider_match_id values: "
+            + ", ".join(duplicated_provider_matches)
+        )
 
     for group_id, team_ids in group_team_ids.items():
         expected_pairs = {tuple(sorted(pair)) for pair in combinations(team_ids, 2)}
@@ -257,6 +278,103 @@ def _validate_fixtures(
         if duplicate_pairs:
             readable = ", ".join(f"{home} vs {away}" for home, away in duplicate_pairs)
             errors.append(f"fixtures duplicate group {group_id} matches: {readable}")
+
+    return provider_match_ids
+
+
+def _validate_knockout_fixtures(
+    raw_fixtures: object,
+    bracket: Mapping[str, object],
+    tournament_format: TournamentFormat,
+    group_provider_match_ids: Sequence[str],
+    errors: list[str],
+) -> None:
+    if raw_fixtures is None:
+        return
+    if not isinstance(raw_fixtures, list):
+        errors.append("knockout_fixtures must be a list when provided")
+        return
+
+    expected_match_ids = _expected_knockout_match_ids(bracket, tournament_format)
+    fixture_ids: list[str] = []
+    provider_match_ids: list[str] = []
+    valid_rounds = set(ROUND_ORDER)
+    for index, raw_fixture in enumerate(raw_fixtures):
+        path = f"knockout_fixtures[{index}]"
+        if not isinstance(raw_fixture, Mapping):
+            errors.append(f"{path} must be an object")
+            continue
+        fixture_id = _required_string(raw_fixture, "id", errors, parent=path)
+        stage = _required_string(raw_fixture, "stage", errors, parent=path)
+        round_name = _required_string(raw_fixture, "round_name", errors, parent=path)
+        provider_match_id = _required_string(
+            raw_fixture,
+            "provider_match_id",
+            errors,
+            parent=path,
+        )
+        kickoff_utc = raw_fixture.get("kickoff_utc")
+
+        if stage and stage != "knockout":
+            errors.append(f"{path}.stage must be 'knockout'")
+        if round_name and round_name not in valid_rounds:
+            errors.append(f"{path}.round_name must be one of: {', '.join(ROUND_ORDER)}")
+        elif fixture_id and fixture_id not in expected_match_ids.get(round_name, set()):
+            errors.append(
+                f"{path}.id is not a generated match id for round {round_name}: "
+                f"{fixture_id}"
+            )
+        if kickoff_utc is not None:
+            if not isinstance(kickoff_utc, str) or not kickoff_utc.strip():
+                errors.append(f"{path}.kickoff_utc must be a non-empty string")
+            else:
+                _validate_utc_datetime(kickoff_utc, f"{path}.kickoff_utc", errors)
+        if fixture_id:
+            fixture_ids.append(fixture_id)
+        if provider_match_id:
+            provider_match_ids.append(provider_match_id)
+
+    duplicated_fixtures = _duplicates(fixture_ids)
+    if duplicated_fixtures:
+        errors.append("duplicate knockout fixture ids: " + ", ".join(duplicated_fixtures))
+    duplicated_provider_matches = _duplicates(provider_match_ids)
+    if duplicated_provider_matches:
+        errors.append(
+            "duplicate knockout fixture provider_match_id values: "
+            + ", ".join(duplicated_provider_matches)
+        )
+    overlapping_provider_matches = sorted(
+        set(provider_match_ids) & set(group_provider_match_ids)
+    )
+    if overlapping_provider_matches:
+        errors.append(
+            "knockout fixture provider_match_id values duplicate group fixtures: "
+            + ", ".join(overlapping_provider_matches)
+        )
+
+
+def _expected_knockout_match_ids(
+    bracket: Mapping[str, object],
+    tournament_format: TournamentFormat,
+) -> dict[str, set[str]]:
+    round_of_32_ids = {
+        str(match["id"])
+        for match in _mappings(bracket.get("round_of_32"))
+        if isinstance(match.get("id"), str)
+    }
+    round_of_16_count = tournament_format.opening_knockout_matches // 2
+    quarter_final_count = round_of_16_count // 2
+    semi_final_count = quarter_final_count // 2
+    return {
+        "round_of_32": round_of_32_ids,
+        "round_of_16": {f"R16-{index}" for index in range(1, round_of_16_count + 1)},
+        "quarter_finals": {
+            f"QF-{index}" for index in range(1, quarter_final_count + 1)
+        },
+        "semi_finals": {f"SF-{index}" for index in range(1, semi_final_count + 1)},
+        "third_place": {"THIRD-1"},
+        "final": {"FINAL-1"},
+    }
 
 
 def _validate_bracket(
@@ -546,3 +664,9 @@ def _validate_utc_datetime(value: str, path: str, errors: list[str]) -> None:
 def _duplicates(values: Sequence[str] | Any) -> list[str]:
     counter = Counter(values)
     return sorted(value for value, count in counter.items() if count > 1)
+
+
+def _mappings(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
