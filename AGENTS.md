@@ -18,7 +18,7 @@ This document is the source of truth for Codex-relevant implementation rules, te
 - PM2 process supervision.
 - `pyproject.toml` for metadata, dependencies, and tool config.
 - Standard `python -m venv` and `pip`; do not require `uv`.
-- pytest for domain and service logic.
+- Standard-library `unittest` for domain and service logic.
 - Pillow for the first generated image renderer.
 
 ## Repository Shape
@@ -139,7 +139,10 @@ Only add Discord application values beyond `DISCORD_TOKEN` when implementation a
 
 ## Testing
 
-Before finishing meaningful code changes, run relevant tests. Minimum expected coverage as features appear:
+Before finishing meaningful code changes, run relevant tests. Prefer
+`python -m unittest discover tests` for the full local suite, or targeted
+`python -m unittest tests.test_module` commands for focused verification.
+Minimum expected coverage as features appear:
 
 - Tournament import validation.
 - Bracket validation.

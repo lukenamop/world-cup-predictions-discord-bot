@@ -21,6 +21,16 @@ class BotContextFilter(logging.Filter):
         return True
 
 
+class DiscordNoiseFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "discord.client":
+            return True
+        return (
+            record.getMessage()
+            != "PyNaCl is not installed, voice will NOT be supported"
+        )
+
+
 def configure_logging(log_level: str, bot_env: str) -> None:
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
@@ -28,5 +38,6 @@ def configure_logging(log_level: str, bot_env: str) -> None:
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    handler.addFilter(DiscordNoiseFilter())
     handler.addFilter(BotContextFilter(bot_env))
     root_logger.addHandler(handler)
