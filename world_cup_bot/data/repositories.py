@@ -18,6 +18,14 @@ class GuildSettings:
     scoring_rules: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class UserPreferences:
+    guild_id: str
+    user_id: str
+    share_full_bracket: bool
+    updated_at: datetime | None = None
+
+
 class GuildSettingsRepository:
     def __init__(self, pool: Any) -> None:
         self.pool = pool
@@ -218,6 +226,96 @@ class GuildSettingsRepository:
             live_results_provider,
             lock_deadline_utc,
         )
+
+
+class UserPreferencesRepository:
+    def __init__(self, pool: Any) -> None:
+        self.pool = pool
+
+    async def list_for_guild(self, *, guild_id: str) -> list[UserPreferences]:
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select
+                    guild_id,
+                    user_id,
+                    share_full_bracket,
+                    updated_at
+                from user_preferences
+                where guild_id = $1
+                order by user_id asc
+                """,
+                guild_id,
+            )
+
+        return [_row_to_user_preferences(row) for row in rows]
+
+    async def get(self, *, guild_id: str, user_id: str) -> UserPreferences:
+        async with self.pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select
+                    guild_id,
+                    user_id,
+                    share_full_bracket,
+                    updated_at
+                from user_preferences
+                where guild_id = $1
+                    and user_id = $2
+                """,
+                guild_id,
+                user_id,
+            )
+
+        if row is None:
+            return UserPreferences(
+                guild_id=guild_id,
+                user_id=user_id,
+                share_full_bracket=False,
+                updated_at=None,
+            )
+        return _row_to_user_preferences(row)
+
+    async def set_share_full_bracket(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        share_full_bracket: bool,
+    ) -> UserPreferences:
+        async with self.pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                insert into user_preferences (
+                    guild_id,
+                    user_id,
+                    share_full_bracket
+                )
+                values ($1, $2, $3)
+                on conflict (guild_id, user_id) do update set
+                    share_full_bracket = excluded.share_full_bracket,
+                    updated_at = now()
+                returning
+                    guild_id,
+                    user_id,
+                    share_full_bracket,
+                    updated_at
+                """,
+                guild_id,
+                user_id,
+                share_full_bracket,
+            )
+
+        return _row_to_user_preferences(row)
+
+
+def _row_to_user_preferences(row: Any) -> UserPreferences:
+    return UserPreferences(
+        guild_id=row["guild_id"],
+        user_id=row["user_id"],
+        share_full_bracket=row["share_full_bracket"],
+        updated_at=row["updated_at"],
+    )
 
 
 def _row_to_guild_settings(row: Any) -> GuildSettings:
@@ -543,6 +641,38 @@ class PredictionRepository:
                     and tournament_config_id = $2
                     and submitted_data is not null
                 order by submitted_at asc, id asc
+                """,
+                guild_id,
+                tournament_config_id,
+            )
+
+        return [_row_to_prediction_entry(row) for row in rows]
+
+    async def list_entries(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+    ) -> list[PredictionEntry]:
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select
+                    id,
+                    guild_id,
+                    tournament_config_id,
+                    user_id,
+                    display_name,
+                    draft_data,
+                    submitted_data,
+                    revision,
+                    draft_updated_at,
+                    submitted_at,
+                    submitted_updated_at
+                from prediction_entries
+                where guild_id = $1
+                    and tournament_config_id = $2
+                order by submitted_at asc nulls last, draft_updated_at asc, id asc
                 """,
                 guild_id,
                 tournament_config_id,
@@ -938,6 +1068,41 @@ class ResultRepository:
             )
 
         return _row_to_sync_run(row) if row else None
+
+    async def list_sync_runs(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+        limit: int = 25,
+    ) -> list[ResultSyncRun]:
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select
+                    id,
+                    guild_id,
+                    tournament_config_id,
+                    provider,
+                    status,
+                    fetched_match_count,
+                    applied_match_count,
+                    warning_count,
+                    details,
+                    started_at,
+                    finished_at
+                from result_sync_runs
+                where guild_id = $1
+                    and tournament_config_id = $2
+                order by started_at desc
+                limit $3
+                """,
+                guild_id,
+                tournament_config_id,
+                limit,
+            )
+
+        return [_row_to_sync_run(row) for row in rows]
 
 
 @dataclass(frozen=True)

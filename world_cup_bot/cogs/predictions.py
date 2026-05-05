@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from io import BytesIO
 from typing import Any
 
 import discord
@@ -24,6 +25,15 @@ from world_cup_bot.services.prediction_service import (
     PredictionServiceError,
     PredictionSessionState,
 )
+from world_cup_bot.services.prediction_view_service import (
+    PredictionSnapshot,
+    PredictionViewService,
+    PredictionViewServiceError,
+    bracket_render_model,
+    group_sheet_render_model,
+    public_prediction_lines,
+)
+from world_cup_bot.ui.image_renderer import render_bracket_png, render_groups_png
 
 
 class PredictionsCog(commands.Cog):
@@ -37,6 +47,123 @@ class PredictionsCog(commands.Cog):
     @discord.slash_command(name="edit", description="Replace your submitted prediction before lock.")
     async def edit_command(self, ctx: discord.ApplicationContext) -> None:
         await self._start_prediction(ctx, edit_existing=True)
+
+    @discord.slash_command(name="prediction", description="Show a user's prediction summary.")
+    async def prediction_command(
+        self,
+        ctx: discord.ApplicationContext,
+        user: discord.Member | None = None,
+    ) -> None:
+        snapshot = await self._snapshot_or_respond(ctx, user)
+        if snapshot is None:
+            return
+        await ctx.respond(embed=_prediction_summary_embed(snapshot), ephemeral=True)
+
+    @discord.slash_command(name="groups", description="Render a user's group prediction sheet.")
+    async def groups_command(
+        self,
+        ctx: discord.ApplicationContext,
+        user: discord.Member | None = None,
+    ) -> None:
+        snapshot = await self._snapshot_or_respond(ctx, user)
+        if snapshot is None:
+            return
+        if not snapshot.can_view_full_prediction:
+            await ctx.respond(_private_prediction_message(snapshot), ephemeral=True)
+            return
+
+        await ctx.defer(ephemeral=True)
+        service = PredictionViewService(self.bot.database.pool)
+        actual_data = await service.actual_data(
+            guild_id=snapshot.guild_id,
+            tournament_config_id=snapshot.entry.tournament_config_id,
+            model=snapshot.model,
+        )
+        png = render_groups_png(group_sheet_render_model(snapshot, actual_data))
+        await ctx.respond(
+            embed=_prediction_summary_embed(snapshot),
+            file=_discord_file(png, f"groups-{snapshot.target_user_id}.png"),
+            ephemeral=True,
+        )
+
+    @discord.slash_command(name="bracket", description="Render a user's knockout bracket.")
+    async def bracket_command(
+        self,
+        ctx: discord.ApplicationContext,
+        user: discord.Member | None = None,
+    ) -> None:
+        snapshot = await self._snapshot_or_respond(ctx, user)
+        if snapshot is None:
+            return
+        if not snapshot.can_view_full_prediction:
+            await ctx.respond(_private_prediction_message(snapshot), ephemeral=True)
+            return
+
+        await ctx.defer(ephemeral=True)
+        service = PredictionViewService(self.bot.database.pool)
+        actual_data = await service.actual_data(
+            guild_id=snapshot.guild_id,
+            tournament_config_id=snapshot.entry.tournament_config_id,
+            model=snapshot.model,
+        )
+        png = render_bracket_png(bracket_render_model(snapshot, actual_data))
+        await ctx.respond(
+            embed=_prediction_summary_embed(snapshot),
+            file=_discord_file(png, f"bracket-{snapshot.target_user_id}.png"),
+            ephemeral=True,
+        )
+
+    @discord.slash_command(name="preferences", description="Manage prediction sharing preferences.")
+    async def preferences_command(
+        self,
+        ctx: discord.ApplicationContext,
+        share_full_bracket: bool | None = None,
+    ) -> None:
+        if ctx.guild is None:
+            await ctx.respond("Preferences can only be used in a server.", ephemeral=True)
+            return
+
+        service = PredictionViewService(self.bot.database.pool)
+        if share_full_bracket is None:
+            preferences = await service.preferences.get(
+                guild_id=str(ctx.guild.id),
+                user_id=str(ctx.author.id),
+            )
+        else:
+            preferences = await service.set_share_full_bracket(
+                guild_id=str(ctx.guild.id),
+                user_id=str(ctx.author.id),
+                share_full_bracket=share_full_bracket,
+            )
+
+        await ctx.respond(
+            (
+                "Full bracket sharing is "
+                f"{'on' if preferences.share_full_bracket else 'off'}. "
+                "Champion, runner-up, and third-place picks remain visible."
+            ),
+            ephemeral=True,
+        )
+
+    async def _snapshot_or_respond(
+        self,
+        ctx: discord.ApplicationContext,
+        user: discord.Member | None,
+    ) -> PredictionSnapshot | None:
+        if ctx.guild is None:
+            await ctx.respond("Prediction views can only be used in a server.", ephemeral=True)
+            return None
+
+        target = user or ctx.author
+        try:
+            return await PredictionViewService(self.bot.database.pool).snapshot(
+                guild_id=str(ctx.guild.id),
+                target_user_id=str(target.id),
+                viewer_user_id=str(ctx.author.id),
+            )
+        except PredictionViewServiceError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return None
 
     async def _start_prediction(
         self,
@@ -327,6 +454,54 @@ def _format_deadline(deadline: datetime | None) -> str:
 
 def _display_name(author: object) -> str:
     return str(getattr(author, "display_name", None) or getattr(author, "name", author))
+
+
+def _prediction_summary_embed(snapshot: PredictionSnapshot) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"{snapshot.display_name}'s prediction",
+        description="\n".join(public_prediction_lines(snapshot)),
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="Privacy",
+        value=(
+            "Full bracket shared"
+            if snapshot.preferences.share_full_bracket
+            else "Full bracket private"
+        ),
+        inline=True,
+    )
+    embed.add_field(
+        name="Lock",
+        value=(
+            f"{snapshot.lock_deadline_utc:%Y-%m-%d %H:%M UTC}"
+            if snapshot.lock_deadline_utc
+            else "Not configured"
+        ),
+        inline=True,
+    )
+    if snapshot.score is not None:
+        embed.add_field(
+            name="Points",
+            value=(
+                f"{snapshot.score.total_points} total\n"
+                f"{snapshot.score.group_points} group / "
+                f"{snapshot.score.knockout_points} knockout"
+            ),
+            inline=False,
+        )
+    return embed
+
+
+def _private_prediction_message(snapshot: PredictionSnapshot) -> str:
+    return (
+        f"{snapshot.display_name} keeps full brackets private. "
+        "Use `/prediction` for their visible placement picks."
+    )
+
+
+def _discord_file(content: bytes, filename: str) -> discord.File:
+    return discord.File(fp=BytesIO(content), filename=filename)
 
 
 def setup(bot: discord.Bot) -> None:

@@ -6,6 +6,7 @@ from typing import Any
 
 from world_cup_bot.data.repositories import (
     GuildSettingsRepository,
+    PredictionEntry,
     PredictionRepository,
     PredictionScore,
     PredictionScoreRepository,
@@ -13,7 +14,11 @@ from world_cup_bot.data.repositories import (
     StoredMatchResult,
     TournamentConfigRepository,
 )
-from world_cup_bot.domain.predictions import TournamentModel
+from world_cup_bot.domain.predictions import (
+    PredictionValidationError,
+    TournamentModel,
+    prediction_summary,
+)
 from world_cup_bot.domain.scoring import SCORING_VERSION, ScoringRules, score_prediction
 from world_cup_bot.domain.standings import MatchResult
 
@@ -35,6 +40,7 @@ class RecalculationSummary:
 class RankedScore:
     rank: int
     score: PredictionScore
+    champion_team_name: str | None = None
 
 
 class LeaderboardService:
@@ -110,6 +116,7 @@ class LeaderboardService:
         scores = await self._ranked_scores(
             guild_id=guild_id,
             tournament_config_id=tournament.id,
+            model=TournamentModel.from_config(tournament.config),
         )
         for ranked in scores:
             if ranked.score.user_id == user_id:
@@ -128,6 +135,7 @@ class LeaderboardService:
         scores = await self._ranked_scores(
             guild_id=guild_id,
             tournament_config_id=tournament.id,
+            model=TournamentModel.from_config(tournament.config),
         )
         return scores[:limit]
 
@@ -136,11 +144,17 @@ class LeaderboardService:
         *,
         guild_id: str,
         tournament_config_id: int,
+        model: TournamentModel,
     ) -> list[RankedScore]:
         scores = await self.scores.list_scores(
             guild_id=guild_id,
             tournament_config_id=tournament_config_id,
         )
+        entries = await self.predictions.list_submitted_entries(
+            guild_id=guild_id,
+            tournament_config_id=tournament_config_id,
+        )
+        champion_by_entry_id = _champion_names_by_entry_id(model, entries)
         ranked: list[RankedScore] = []
         previous_points: int | None = None
         current_rank = 0
@@ -148,8 +162,40 @@ class LeaderboardService:
             if previous_points != score.total_points:
                 current_rank = index
                 previous_points = score.total_points
-            ranked.append(RankedScore(rank=current_rank, score=score))
+            ranked.append(
+                RankedScore(
+                    rank=current_rank,
+                    score=score,
+                    champion_team_name=champion_by_entry_id.get(score.prediction_entry_id),
+                )
+            )
         return ranked
+
+
+def _champion_names_by_entry_id(
+    model: TournamentModel,
+    entries: list[PredictionEntry],
+) -> dict[int, str]:
+    champion_names: dict[int, str] = {}
+    for entry in entries:
+        if entry.submitted_data is None:
+            continue
+        try:
+            summary = prediction_summary(model, entry.submitted_data)
+            champion_names[entry.id] = model.team(summary.champion_team_id).short_name
+        except PredictionValidationError:
+            continue
+    return champion_names
+
+
+def leaderboard_row_text(ranked: RankedScore) -> str:
+    score = ranked.score
+    champion = ranked.champion_team_name or "Unavailable"
+    return (
+        f"#{ranked.rank} {score.display_name} - {score.total_points} pts "
+        f"({score.group_points} group, {score.knockout_points} knockout) "
+        f"Champion: {champion}"
+    )
 
 
 def _to_domain_result(result: StoredMatchResult) -> MatchResult:

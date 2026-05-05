@@ -1,14 +1,20 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 4 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, private prediction draft/submission flows, live result sync, scoring recalculation, ranks, and point breakdowns.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 5 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, private prediction draft/submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images, preferences, admin posting, exports, and backups.
 
 ## Current Command Surface
 
 - `/help` confirms the bot is online and lists the current prediction commands.
 - `/predict` starts or resumes a private guided prediction draft.
 - `/edit` starts a private replacement draft for an already submitted prediction before lock. The last submitted bracket remains stored until the replacement draft is submitted.
+- `/prediction [user]` shows visible champion, runner-up, third-place, and point summary details.
+- `/groups [user]` renders a user's submitted group prediction image with result highlighting when the viewer is the owner or the user has shared full brackets.
+- `/bracket [user]` renders a user's submitted knockout bracket image with result highlighting when the viewer is the owner or the user has shared full brackets.
+- `/preferences [share_full_bracket]` views or updates whether other members can see full bracket and group images.
+- `/leaderboard [page]` shows paginated shared-rank league standings.
 - `/rank [user]` shows a user's current shared rank and point totals after scores have been recalculated.
 - `/points [user]` shows a user's group/knockout point breakdown after scores have been recalculated.
+- `/rules` shows scoring and lock behavior.
 - `/admin status` shows setup status for the current server, including active tournament data.
 - `/admin import [path] [validate_only]` validates a tournament JSON file under `config/` and imports it for the current server when valid.
 - `/admin open` opens prediction entry.
@@ -16,10 +22,11 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/admin lock [deadline_utc] [clear]` sets or clears the full-bracket lock deadline. Use ISO-8601 UTC timestamps such as `2026-06-11T18:00:00Z`.
 - `/admin sync [run]` shows the latest live result sync status, or triggers a manual sync when `run:True`.
 - `/admin recalc` recalculates submitted prediction scores from stored results.
+- `/admin post [kind] [channel]` posts `leaderboard`, `rules`, `lock`, or `status` snapshots to a channel.
+- `/admin export` returns a JSON export of submitted predictions and current scores.
+- `/admin backup` returns an operator-friendly JSON backup of league settings, active tournament config, predictions, scores, stored results, and recent sync runs.
 
 Admin commands require Discord Manage Server permission by default. Grant role or member overrides through Discord Server Settings > Integrations > Command Permissions.
-
-Full leaderboard pagination, generated visuals, exports, backups, and richer admin workflows are intentionally left for later milestones.
 
 ## Ubuntu PostgreSQL Setup
 
@@ -153,6 +160,16 @@ Prediction entry is private and draft-based:
 
 Prediction storage uses `prediction_entries` for the latest draft/submission and `prediction_history` for revision history.
 
+## Prediction Views And Privacy
+
+Full brackets are private by default. A member can opt in to sharing full group and bracket image views:
+
+```text
+/preferences share_full_bracket:True
+```
+
+Champion, runner-up, third-place picks, and available point totals remain visible through `/prediction [user]`. The generated `/groups` and `/bracket` images include accessible embed summaries and use explicit `OK`, `X`, and `...` status labels alongside colors so correctness does not rely on color alone.
+
 ## Results And Scoring
 
 Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `football_data_org`. For football-data.org, set `LIVE_RESULTS_API_KEY`; the bot calls the v4 competition matches endpoint for the tournament start year and stores any provider matches that map to imported fixture IDs.
@@ -172,6 +189,24 @@ Manual recalculation without fetching new provider data:
 ```
 
 Scoring uses the MVP defaults from `PRODUCT-SPEC.md`: group winner 3, group runner-up 2, third-place qualifier 1, Round of 32 1, Round of 16 2, quarter-final 5, semi-final 10, final 15, third-place winner 10, champion 25, and runner-up 15. Group winner/runner-up and best-third points are awarded only after the relevant group stage data is complete. Knockout points are team-advancement based: a user gets credit when a predicted team reaches the scored round, even if the exact path differs.
+
+## Admin Posting, Export, And Backup
+
+Admins can post snapshots without manually composing announcements:
+
+```text
+/admin post kind:leaderboard
+/admin post kind:rules channel:#predictions
+/admin post kind:lock
+/admin post kind:status
+```
+
+Prediction exports and backups are returned as ephemeral JSON attachments and write audit log rows:
+
+```text
+/admin export
+/admin backup
+```
 
 ## PM2
 

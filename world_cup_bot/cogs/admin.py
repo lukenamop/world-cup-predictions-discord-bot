@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 import discord
@@ -12,6 +13,8 @@ from world_cup_bot.data.repositories import (
     ResultRepository,
     TournamentConfigRepository,
 )
+from world_cup_bot.domain.scoring import ScoringRules
+from world_cup_bot.services.export_service import ExportService, ExportServiceError
 from world_cup_bot.services.leaderboard_service import (
     LeaderboardService,
     LeaderboardServiceError,
@@ -48,67 +51,16 @@ class AdminCog(commands.Cog):
             guild_id
         )
 
-        embed = discord.Embed(
-            title="World Cup league status",
-            color=discord.Color.blurple(),
-        )
-        embed.add_field(
-            name="Tournament",
-            value=(
-                f"{tournament.tournament_name}\n"
-                f"`{tournament.tournament_id}` / schema `{tournament.schema_version}`"
-                if tournament is not None
-                else "Not imported"
+        await ctx.respond(
+            embed=_status_embed(
+                settings=settings,
+                tournament=tournament,
+                default_timezone=self.bot.settings.default_timezone,
+                default_provider=self.bot.settings.live_results_provider,
+                command_sync_status=self.bot.command_sync_status,
             ),
-            inline=False,
+            ephemeral=True,
         )
-        embed.add_field(
-            name="Data",
-            value=(
-                f"Hash `{tournament.config_hash[:12]}`\n"
-                f"Imported {tournament.imported_at:%Y-%m-%d %H:%M UTC}"
-                if tournament is not None
-                else "Run `/admin import` with a complete tournament JSON file."
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="Predictions",
-            value=(
-                "Open" if settings and settings.predictions_open else "Closed"
-            ),
-            inline=True,
-        )
-        embed.add_field(
-            name="Lock deadline",
-            value=(
-                f"{settings.lock_deadline_utc:%Y-%m-%d %H:%M UTC}"
-                if settings and settings.lock_deadline_utc
-                else "First tournament kickoff"
-            ),
-            inline=True,
-        )
-        embed.add_field(
-            name="Timezone",
-            value=settings.timezone if settings else self.bot.settings.default_timezone,
-            inline=True,
-        )
-        embed.add_field(
-            name="Live provider",
-            value=(
-                settings.live_results_provider
-                if settings
-                else self.bot.settings.live_results_provider
-            ),
-            inline=True,
-        )
-        embed.add_field(
-            name="Slash commands",
-            value=self.bot.command_sync_status,
-            inline=True,
-        )
-
-        await ctx.respond(embed=embed, ephemeral=True)
 
     @admin.command(name="open", description="Open prediction entry for this server.")
     async def open_command(self, ctx: discord.ApplicationContext) -> None:
@@ -394,6 +346,125 @@ class AdminCog(commands.Cog):
             ephemeral=True,
         )
 
+    @admin.command(name="post", description="Post a league announcement snapshot.")
+    async def post_command(
+        self,
+        ctx: discord.ApplicationContext,
+        kind: str = "leaderboard",
+        channel: discord.TextChannel | None = None,
+    ) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        guild_id = _guild_id(ctx)
+        destination = channel or ctx.channel
+        if destination is None or not hasattr(destination, "send"):
+            await ctx.respond("Pick a text channel for the announcement.", ephemeral=True)
+            return
+
+        normalized = kind.strip().lower()
+        try:
+            embed = await self._announcement_embed(guild_id, normalized)
+        except (LeaderboardServiceError, ValueError) as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        await destination.send(embed=embed)
+        await AuditLogRepository(self.bot.database.pool).insert(
+            guild_id=guild_id,
+            actor_user_id=str(ctx.author.id),
+            action="announcement_posted",
+            details={
+                "kind": normalized,
+                "channel_id": str(getattr(destination, "id", "")),
+            },
+        )
+        await ctx.respond(f"Posted `{normalized}` to {destination.mention}.", ephemeral=True)
+
+    @admin.command(name="export", description="Export submitted predictions as JSON.")
+    async def export_command(self, ctx: discord.ApplicationContext) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        await ctx.defer(ephemeral=True)
+        guild_id = _guild_id(ctx)
+        try:
+            filename, content = await ExportService(self.bot.database.pool).prediction_export(
+                guild_id=guild_id,
+            )
+        except ExportServiceError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        await AuditLogRepository(self.bot.database.pool).insert(
+            guild_id=guild_id,
+            actor_user_id=str(ctx.author.id),
+            action="predictions_exported",
+            details={"filename": filename},
+        )
+        await ctx.respond(
+            "Prediction export ready.",
+            file=discord.File(fp=BytesIO(content), filename=filename),
+            ephemeral=True,
+        )
+
+    @admin.command(name="backup", description="Create a JSON backup for this league.")
+    async def backup_command(self, ctx: discord.ApplicationContext) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        await ctx.defer(ephemeral=True)
+        guild_id = _guild_id(ctx)
+        try:
+            filename, content = await ExportService(self.bot.database.pool).backup(
+                guild_id=guild_id,
+            )
+        except ExportServiceError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        await AuditLogRepository(self.bot.database.pool).insert(
+            guild_id=guild_id,
+            actor_user_id=str(ctx.author.id),
+            action="league_backup_created",
+            details={"filename": filename},
+        )
+        await ctx.respond(
+            "Backup ready.",
+            file=discord.File(fp=BytesIO(content), filename=filename),
+            ephemeral=True,
+        )
+
+    async def _announcement_embed(self, guild_id: str, kind: str) -> discord.Embed:
+        if kind == "leaderboard":
+            from world_cup_bot.cogs.leaderboard import leaderboard_embed
+
+            scores = await LeaderboardService(self.bot.database.pool).top_scores(
+                guild_id=guild_id,
+                limit=10,
+            )
+            if not scores:
+                raise ValueError("No leaderboard scores are available yet.")
+            return leaderboard_embed(scores)
+
+        settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
+        tournament = await TournamentConfigRepository(self.bot.database.pool).get_active(
+            guild_id
+        )
+        if kind == "rules":
+            return _rules_embed(settings=settings, tournament=tournament)
+        if kind == "lock":
+            return _lock_embed(settings=settings)
+        if kind == "status":
+            return _status_embed(
+                settings=settings,
+                tournament=tournament,
+                default_timezone=self.bot.settings.default_timezone,
+                default_provider=self.bot.settings.live_results_provider,
+                command_sync_status=self.bot.command_sync_status,
+            )
+        raise ValueError("Post kind must be one of: leaderboard, rules, lock, status.")
+
     async def _ensure_admin(self, ctx: discord.ApplicationContext) -> bool:
         if ctx.guild is None:
             await ctx.respond("Admin commands can only be used in a server.", ephemeral=True)
@@ -435,6 +506,131 @@ def _success_embed(
         inline=False,
     )
     embed.add_field(name="Hash", value=f"`{config_hash[:12]}`", inline=True)
+    return embed
+
+
+def _status_embed(
+    *,
+    settings: object,
+    tournament: object,
+    default_timezone: str,
+    default_provider: str,
+    command_sync_status: str,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title="World Cup league status",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="Tournament",
+        value=(
+            f"{tournament.tournament_name}\n"
+            f"`{tournament.tournament_id}` / schema `{tournament.schema_version}`"
+            if tournament is not None
+            else "Not imported"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Data",
+        value=(
+            f"Hash `{tournament.config_hash[:12]}`\n"
+            f"Imported {tournament.imported_at:%Y-%m-%d %H:%M UTC}"
+            if tournament is not None
+            else "Run `/admin import` with a complete tournament JSON file."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Predictions",
+        value="Open" if settings and settings.predictions_open else "Closed",
+        inline=True,
+    )
+    embed.add_field(
+        name="Lock deadline",
+        value=(
+            f"{settings.lock_deadline_utc:%Y-%m-%d %H:%M UTC}"
+            if settings and settings.lock_deadline_utc
+            else "First tournament kickoff"
+        ),
+        inline=True,
+    )
+    embed.add_field(
+        name="Timezone",
+        value=settings.timezone if settings else default_timezone,
+        inline=True,
+    )
+    embed.add_field(
+        name="Live provider",
+        value=settings.live_results_provider if settings else default_provider,
+        inline=True,
+    )
+    embed.add_field(
+        name="Slash commands",
+        value=command_sync_status,
+        inline=True,
+    )
+    return embed
+
+
+def _rules_embed(*, settings: object, tournament: object) -> discord.Embed:
+    rules = ScoringRules.from_mapping(settings.scoring_rules if settings else None)
+    embed = discord.Embed(
+        title="League rules",
+        description=(
+            "Predictions are score-agnostic and lock as a full bracket. "
+            "Knockout scoring gives team-advancement credit even if the path differs."
+        ),
+        color=discord.Color.blurple(),
+    )
+    if tournament is not None:
+        embed.add_field(name="Tournament", value=tournament.tournament_name, inline=False)
+    embed.add_field(
+        name="Group stage",
+        value=(
+            f"Winner {rules.group_winner}, runner-up {rules.group_runner_up}, "
+            f"third-place qualifier {rules.group_third_place_qualifier}"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Knockout advancement",
+        value=(
+            f"R32 {rules.round_of_32_advancement}, "
+            f"R16 {rules.round_of_16_advancement}, "
+            f"QF {rules.quarter_final_advancement}, "
+            f"SF {rules.semi_final_advancement}, "
+            f"Final {rules.final_advancement}"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Placements",
+        value=(
+            f"Third place {rules.third_place_winner}, "
+            f"champion {rules.champion}, runner-up {rules.runner_up}"
+        ),
+        inline=False,
+    )
+    return embed
+
+
+def _lock_embed(*, settings: object) -> discord.Embed:
+    embed = discord.Embed(title="Prediction lock", color=discord.Color.gold())
+    embed.add_field(
+        name="Status",
+        value="Open" if settings and settings.predictions_open else "Closed",
+        inline=True,
+    )
+    embed.add_field(
+        name="Deadline",
+        value=(
+            f"{settings.lock_deadline_utc:%Y-%m-%d %H:%M UTC}"
+            if settings and settings.lock_deadline_utc
+            else "First tournament kickoff"
+        ),
+        inline=True,
+    )
     return embed
 
 
