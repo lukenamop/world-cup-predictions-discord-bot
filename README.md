@@ -1,0 +1,120 @@
+# World Cup Bracket Predictor Bot
+
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 1 from `PRODUCT-SPEC.md`: configuration, startup logging, PM2 setup, PostgreSQL persistence foundation, migrations, and basic bot health visibility.
+
+## Current Command Surface
+
+- `/help` confirms the bot is online and points users to the upcoming prediction flow.
+
+Prediction entry, tournament import, scoring, leaderboards, and admin workflows are intentionally left for later milestones.
+
+## Ubuntu PostgreSQL Setup
+
+Install PostgreSQL and create the local database/user:
+
+```bash
+sudo apt update
+sudo apt install postgresql postgresql-contrib
+sudo -u postgres createuser --createdb world_cup_bot
+sudo -u postgres createdb --owner=world_cup_bot world_cup_bot
+sudo -u postgres psql -c "ALTER USER world_cup_bot WITH PASSWORD 'change-me-local-only';"
+```
+
+Use this local connection string:
+
+```bash
+postgresql://world_cup_bot:change-me-local-only@localhost:5432/world_cup_bot
+```
+
+## Local Setup
+
+Use Python 3.12:
+
+```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env
+```
+
+Fill in `.env` locally. Never commit real tokens or provider credentials. Load it
+in each shell before running commands that need bot configuration:
+
+```bash
+set -a
+. .env
+set +a
+```
+
+Required environment variables:
+
+- `DISCORD_TOKEN`
+- `DATABASE_URL`
+
+Optional environment variables:
+
+- `BOT_ENV`, default `development`
+- `LOG_LEVEL`, default `INFO`
+- `OWNER_USER_IDS`, comma-separated Discord IDs
+- `DEFAULT_TIMEZONE`, default `America/Indiana/Indianapolis`
+- `LIVE_RESULTS_PROVIDER`, default `football_data_org`
+- `LIVE_RESULTS_API_KEY`, only when a provider requires it
+
+## Running The Bot
+
+```bash
+. .venv/bin/activate
+set -a
+. .env
+set +a
+python -m world_cup_bot.bot
+```
+
+At startup the bot:
+
+- validates required configuration;
+- configures structured console logging;
+- connects to PostgreSQL;
+- applies numbered SQL migrations in `world_cup_bot/data/migrations`;
+- records startup/ready health rows;
+- logs environment, masked database target, guild count, and slash command sync status.
+
+## Health Check
+
+Run the operator health check from the same environment:
+
+```bash
+. .venv/bin/activate
+set -a
+. .env
+set +a
+python scripts/healthcheck.py
+```
+
+The health check validates configuration, connects to PostgreSQL, applies any pending migrations, and runs a simple database query.
+
+## PM2
+
+Install PM2 on the host and start the production process:
+
+```bash
+set -a
+. .env
+set +a
+pm2 start ecosystem.config.js --env production
+pm2 logs world-cup-bot
+pm2 status world-cup-bot
+```
+
+The PM2 config runs `.venv/bin/python -m world_cup_bot.bot` directly and uses a restart delay to avoid tight crash loops.
+
+## Migrations
+
+Migrations are plain numbered SQL files in `world_cup_bot/data/migrations`. They run automatically at bot startup and in `scripts/healthcheck.py`. Applied migration names are tracked in `schema_migrations`.
+
+## Tests
+
+```bash
+. .venv/bin/activate
+pytest
+```
