@@ -33,7 +33,7 @@ class SettingsTests(unittest.TestCase):
             AppSettings.from_env(
                 {
                     "DISCORD_TOKEN": "token",
-                    "DATABASE_URL": "postgresql://localhost/world_cup_bot",
+                    "DATABASE_URL": "postgresql://world_cup_bot@localhost/world_cup_bot",
                     "DEFAULT_TIMEZONE": "Not/AZone",
                 }
             )
@@ -43,8 +43,26 @@ class SettingsTests(unittest.TestCase):
             AppSettings.from_env(
                 {
                     "DISCORD_TOKEN": "token",
-                    "DATABASE_URL": "postgresql://localhost/world_cup_bot",
+                    "DATABASE_URL": "postgresql://world_cup_bot@localhost/world_cup_bot",
                     "LOG_LEVEL": "chatty",
+                }
+            )
+
+    def test_database_url_without_database_name_fails_clearly(self) -> None:
+        with self.assertRaisesRegex(SettingsError, "missing database name"):
+            AppSettings.from_env(
+                {
+                    "DISCORD_TOKEN": "token",
+                    "DATABASE_URL": "postgresql://world_cup_bot:secret@localhost:5432",
+                }
+            )
+
+    def test_database_url_without_user_fails_clearly(self) -> None:
+        with self.assertRaisesRegex(SettingsError, "missing database user"):
+            AppSettings.from_env(
+                {
+                    "DISCORD_TOKEN": "token",
+                    "DATABASE_URL": "postgresql://localhost:5432/world_cup_bot",
                 }
             )
 

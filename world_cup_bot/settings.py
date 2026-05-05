@@ -46,6 +46,8 @@ class AppSettings:
         if missing:
             names = ", ".join(missing)
             raise SettingsError(f"Missing required environment variable(s): {names}")
+        if database_url:
+            _validate_database_url(database_url)
 
         timezone = _clean(source.get("DEFAULT_TIMEZONE")) or DEFAULT_TIMEZONE
         _validate_timezone(timezone)
@@ -86,6 +88,22 @@ def mask_database_url(database_url: str) -> str:
     database = parts.path.lstrip("/") or "<database-missing>"
     username = parts.username or "<user-missing>"
     return f"{parts.scheme}://{username}:***@{host}{port}/{database}"
+
+
+def _validate_database_url(database_url: str) -> None:
+    parts = urlsplit(database_url)
+    if parts.scheme not in {"postgresql", "postgres"}:
+        raise SettingsError("Invalid DATABASE_URL: expected postgresql:// URL")
+    if not parts.username:
+        raise SettingsError("Invalid DATABASE_URL: missing database user")
+    if not parts.hostname:
+        raise SettingsError("Invalid DATABASE_URL: missing database host")
+    if not parts.path.lstrip("/"):
+        raise SettingsError("Invalid DATABASE_URL: missing database name")
+    try:
+        parts.port
+    except ValueError as exc:
+        raise SettingsError("Invalid DATABASE_URL: invalid database port") from exc
 
 
 def _parse_owner_ids(raw_value: str | None) -> frozenset[str]:
