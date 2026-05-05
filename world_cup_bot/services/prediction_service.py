@@ -18,7 +18,6 @@ from world_cup_bot.domain.predictions import (
     TournamentModel,
     empty_prediction_data,
     is_submission_complete,
-    restart_prediction_data,
 )
 
 
@@ -35,6 +34,7 @@ class PredictionSessionState:
     entry: PredictionEntry | None
     data: dict[str, Any]
     lock_deadline_utc: datetime | None
+    edit_existing: bool
 
 
 class PredictionService:
@@ -83,23 +83,7 @@ class PredictionService:
             entry=entry,
             data=data,
             lock_deadline_utc=lock_deadline,
-        )
-
-    async def save_draft(
-        self,
-        *,
-        state: PredictionSessionState,
-        user_id: str,
-        display_name: str,
-        data: dict[str, Any],
-    ) -> PredictionEntry:
-        await self._ensure_session_can_write(state)
-        return await self.predictions.save_draft(
-            guild_id=state.guild_id,
-            tournament_config_id=state.tournament.id,
-            user_id=user_id,
-            display_name=display_name,
-            data=data,
+            edit_existing=edit_existing,
         )
 
     async def submit(
@@ -111,9 +95,10 @@ class PredictionService:
         data: dict[str, Any],
     ) -> PredictionEntry:
         await self._ensure_session_can_write(state)
+        await self._ensure_submit_matches_session(state, user_id=user_id)
         if not is_submission_complete(state.model, data):
             raise PredictionValidationError("Prediction is not complete yet.")
-        return await self.predictions.submit_draft(
+        return await self.predictions.submit_prediction(
             guild_id=state.guild_id,
             tournament_config_id=state.tournament.id,
             user_id=user_id,
@@ -140,6 +125,29 @@ class PredictionService:
         ):
             raise PredictionServiceError("Predictions are locked for this tournament.")
 
+    async def _ensure_submit_matches_session(
+        self,
+        state: PredictionSessionState,
+        *,
+        user_id: str,
+    ) -> None:
+        entry = await self.predictions.get_entry(
+            guild_id=state.guild_id,
+            tournament_config_id=state.tournament.id,
+            user_id=user_id,
+        )
+        has_submission = entry is not None and entry.submitted_data is not None
+        if state.edit_existing:
+            if not has_submission:
+                raise PredictionServiceError(
+                    "You do not have a submitted prediction to edit yet. Use `/predict` first."
+                )
+            return
+        if has_submission:
+            raise PredictionServiceError(
+                "You already have a submitted prediction. Use `/edit` before lock to replace it."
+            )
+
     def _session_data(
         self,
         entry: PredictionEntry | None,
@@ -147,11 +155,19 @@ class PredictionService:
         edit_existing: bool,
     ) -> dict[str, Any]:
         if entry is None:
+            if edit_existing:
+                raise PredictionServiceError(
+                    "You do not have a submitted prediction to edit yet. Use `/predict` first."
+                )
+            return empty_prediction_data()
+        if entry.submitted_data is None:
+            if edit_existing:
+                raise PredictionServiceError(
+                    "You do not have a submitted prediction to edit yet. Use `/predict` first."
+                )
             return empty_prediction_data()
         if edit_existing:
-            if entry.draft_data and entry.draft_data != entry.submitted_data:
-                return dict(entry.draft_data)
-            return restart_prediction_data()
-        if entry.draft_data:
-            return dict(entry.draft_data)
-        return dict(entry.submitted_data) if entry.submitted_data else empty_prediction_data()
+            return dict(entry.submitted_data)
+        raise PredictionServiceError(
+            "You already have a submitted prediction. Use `/edit` before lock to replace it."
+        )

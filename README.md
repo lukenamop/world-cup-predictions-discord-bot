@@ -1,12 +1,12 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 5 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, private prediction draft/submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images, preferences, admin posting, exports, and backups.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 5 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images, preferences, admin posting, exports, and backups.
 
 ## Current Command Surface
 
 - `/help` confirms the bot is online and lists the current prediction commands.
-- `/predict` starts or resumes a private guided prediction draft.
-- `/edit` starts a private replacement draft for an already submitted prediction before lock. The last submitted bracket remains stored until the replacement draft is submitted.
+- `/predict` starts a private guided prediction session and submits the bracket when completed.
+- `/edit` starts a private edit session for an already submitted prediction before lock. The last submitted bracket remains active until the edit session is completed and submitted.
 - `/prediction [user]` shows visible champion, runner-up, third-place, and point summary details.
 - `/groups [user]` renders a user's submitted group prediction image with result highlighting when the viewer is the owner or the user has shared full brackets.
 - `/bracket [user]` renders a user's submitted knockout bracket image with result highlighting when the viewer is the owner or the user has shared full brackets.
@@ -148,17 +148,17 @@ Successful imports are stored in PostgreSQL as immutable config snapshots and ma
 
 ## Prediction Entry
 
-Prediction entry is private and draft-based:
+Prediction entry is private and submit-based:
 
 - Admins import tournament data, then run `/admin open`.
 - `/predict` walks members through group ranking, predicted advancing third-place teams, and knockout winners.
 - Group ranking is captured one position at a time so ordering is explicit.
 - The Round of 32 is seeded automatically from group predictions, selected third-place qualifiers, and the imported allocation table.
-- Drafts save after each step and can also be saved manually.
-- `/edit` starts a replacement draft before lock. Existing submitted data is not replaced until the new draft is complete and submitted.
+- Completing `/predict` submits the bracket. There is no supported user-facing saved draft workflow.
+- `/edit` starts a replacement flow before lock. Existing submitted data is not replaced until the edit flow is complete and submitted.
 - Predictions lock at `/admin lock deadline_utc:...` when configured; otherwise the first imported fixture kickoff is used as the effective lock.
 
-Prediction storage uses `prediction_entries` for the latest draft/submission and `prediction_history` for revision history.
+Prediction storage keeps the latest submitted prediction and `prediction_history` revision rows. Any temporary in-progress state should be treated as an implementation detail, not a user-facing draft feature.
 
 ## Prediction Views And Privacy
 

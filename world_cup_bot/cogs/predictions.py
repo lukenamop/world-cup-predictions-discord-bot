@@ -40,7 +40,7 @@ class PredictionsCog(commands.Cog):
     def __init__(self, bot: discord.Bot) -> None:
         self.bot = bot
 
-    @discord.slash_command(name="predict", description="Start or resume your prediction entry.")
+    @discord.slash_command(name="predict", description="Start your prediction entry.")
     async def predict_command(self, ctx: discord.ApplicationContext) -> None:
         await self._start_prediction(ctx, edit_existing=False)
 
@@ -217,14 +217,6 @@ class PredictionEntrySession:
     def model(self) -> TournamentModel:
         return self.state.model
 
-    async def save_draft(self) -> None:
-        await self.service.save_draft(
-            state=self.state,
-            user_id=self.user_id,
-            display_name=self.display_name,
-            data=self.data,
-        )
-
     async def submit(self) -> None:
         await self.service.submit(
             state=self.state,
@@ -320,15 +312,8 @@ class PredictionEntryView(discord.ui.View):
             select.callback = select_callback
             self.add_item(select)
 
-        save_button = discord.ui.Button(
-            label="Save draft",
-            style=discord.ButtonStyle.secondary,
-        )
-        save_button.callback = self._save_callback
-        self.add_item(save_button)
-
         restart_button = discord.ui.Button(
-            label="Restart draft",
+            label="Start over",
             style=discord.ButtonStyle.danger,
         )
         restart_button.callback = self._restart_callback
@@ -351,27 +336,14 @@ class PredictionEntryView(discord.ui.View):
         values = [str(value) for value in select.values]
         try:
             self.session.data = self._apply_step(step, values)
-            await self.session.save_draft()
-            self.notice = "Draft saved."
-        except (PredictionValidationError, PredictionServiceError) as exc:
-            self.notice = str(exc)
-        await self._edit(interaction)
-
-    async def _save_callback(self, interaction: discord.Interaction) -> None:
-        try:
-            await self.session.save_draft()
-            self.notice = "Draft saved."
-        except PredictionServiceError as exc:
+            self.notice = "Selection recorded."
+        except PredictionValidationError as exc:
             self.notice = str(exc)
         await self._edit(interaction)
 
     async def _restart_callback(self, interaction: discord.Interaction) -> None:
         self.session.data = restart_prediction_data()
-        try:
-            await self.session.save_draft()
-            self.notice = "Replacement draft restarted. Your last submission stays stored until you submit this draft."
-        except PredictionServiceError as exc:
-            self.notice = str(exc)
+        self.notice = "Prediction entry restarted. Nothing changes until you submit."
         await self._edit(interaction)
 
     async def _submit_callback(self, interaction: discord.Interaction) -> None:

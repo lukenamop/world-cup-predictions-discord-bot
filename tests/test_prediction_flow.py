@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import unittest
 
-from world_cup_bot.data.repositories import ActiveTournamentConfig, GuildSettings
+from world_cup_bot.data.repositories import ActiveTournamentConfig, GuildSettings, PredictionEntry
 from world_cup_bot.domain.locks import effective_lock_deadline, is_prediction_locked
 from world_cup_bot.domain.predictions import (
     TournamentModel,
@@ -23,7 +23,7 @@ from world_cup_bot.services.prediction_service import (
 
 
 class PredictionServiceWriteValidationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_save_draft_rechecks_predictions_are_open(self) -> None:
+    async def test_submit_rechecks_predictions_are_open(self) -> None:
         tournament = _active_tournament(1)
         service, predictions = _prediction_service(
             settings=_guild_settings(predictions_open=False),
@@ -31,16 +31,16 @@ class PredictionServiceWriteValidationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaisesRegex(PredictionServiceError, "closed"):
-            await service.save_draft(
+            await service.submit(
                 state=_session_state(tournament),
                 user_id="user-1",
                 display_name="User One",
                 data=empty_prediction_data(),
             )
 
-        self.assertEqual(predictions.save_calls, 0)
+        self.assertEqual(predictions.submit_calls, 0)
 
-    async def test_save_draft_rechecks_current_lock_deadline(self) -> None:
+    async def test_submit_rechecks_current_lock_deadline(self) -> None:
         tournament = _active_tournament(1)
         service, predictions = _prediction_service(
             settings=_guild_settings(
@@ -50,14 +50,14 @@ class PredictionServiceWriteValidationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaisesRegex(PredictionServiceError, "locked"):
-            await service.save_draft(
+            await service.submit(
                 state=_session_state(tournament),
                 user_id="user-1",
                 display_name="User One",
                 data=empty_prediction_data(),
             )
 
-        self.assertEqual(predictions.save_calls, 0)
+        self.assertEqual(predictions.submit_calls, 0)
 
     async def test_submit_rechecks_active_tournament_before_validation(self) -> None:
         original_tournament = _active_tournament(1)
@@ -76,37 +76,119 @@ class PredictionServiceWriteValidationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(predictions.submit_calls, 0)
 
+    async def test_predict_rejects_existing_submitted_prediction(self) -> None:
+        service, _predictions = _prediction_service(
+            settings=_guild_settings(),
+            tournament=_active_tournament(1),
+            entry=_prediction_entry(submitted_data={"submitted": True}),
+        )
+
+        with self.assertRaisesRegex(PredictionServiceError, "already have"):
+            await service.start_prediction(
+                guild_id="guild-1",
+                user_id="user-1",
+                edit_existing=False,
+            )
+
+    async def test_edit_requires_existing_submitted_prediction(self) -> None:
+        service, _predictions = _prediction_service(
+            settings=_guild_settings(),
+            tournament=_active_tournament(1),
+            entry=None,
+        )
+
+        with self.assertRaisesRegex(PredictionServiceError, "do not have"):
+            await service.start_prediction(
+                guild_id="guild-1",
+                user_id="user-1",
+                edit_existing=True,
+            )
+
+    async def test_edit_uses_submitted_data_not_unsubmitted_draft_data(self) -> None:
+        service, _predictions = _prediction_service(
+            settings=_guild_settings(),
+            tournament=_active_tournament(1),
+            entry=_prediction_entry(
+                draft_data={"unsubmitted": True},
+                submitted_data={"submitted": True},
+            ),
+        )
+
+        state = await service.start_prediction(
+            guild_id="guild-1",
+            user_id="user-1",
+            edit_existing=True,
+        )
+
+        self.assertEqual(state.data, {"submitted": True})
+
+    async def test_predict_ignores_legacy_unsubmitted_draft_rows(self) -> None:
+        service, _predictions = _prediction_service(
+            settings=_guild_settings(),
+            tournament=_active_tournament(1),
+            entry=_prediction_entry(
+                draft_data={"unsubmitted": True},
+                submitted_data=None,
+            ),
+        )
+
+        state = await service.start_prediction(
+            guild_id="guild-1",
+            user_id="user-1",
+            edit_existing=False,
+        )
+
+        self.assertEqual(state.data, empty_prediction_data())
+
+    async def test_submit_rejects_stale_predict_session_after_submission_exists(self) -> None:
+        service, predictions = _prediction_service(
+            settings=_guild_settings(),
+            tournament=_active_tournament(1),
+            entry=None,
+        )
+        state = await service.start_prediction(
+            guild_id="guild-1",
+            user_id="user-1",
+            edit_existing=False,
+        )
+        predictions.entry = _prediction_entry(submitted_data={"submitted": True})
+
+        with self.assertRaisesRegex(PredictionServiceError, "already have"):
+            await service.submit(
+                state=state,
+                user_id="user-1",
+                display_name="User One",
+                data=_completed_prediction_data(state.model),
+            )
+
+        self.assertEqual(predictions.submit_calls, 0)
+
+    async def test_submit_allows_edit_session_when_submission_exists(self) -> None:
+        service, predictions = _prediction_service(
+            settings=_guild_settings(),
+            tournament=_active_tournament(1),
+            entry=_prediction_entry(submitted_data={"submitted": True}),
+        )
+        state = await service.start_prediction(
+            guild_id="guild-1",
+            user_id="user-1",
+            edit_existing=True,
+        )
+
+        await service.submit(
+            state=state,
+            user_id="user-1",
+            display_name="User One",
+            data=_completed_prediction_data(state.model),
+        )
+
+        self.assertEqual(predictions.submit_calls, 1)
+
 
 class PredictionFlowTests(unittest.TestCase):
     def test_prediction_flow_seeds_knockout_and_reaches_final_placements(self) -> None:
         model = TournamentModel.from_config(_prediction_config())
-        data = empty_prediction_data()
-
-        while True:
-            step = next_prediction_step(model, data)
-            if step.kind == "submit":
-                break
-            if step.kind == "group_pick":
-                data = record_group_pick(
-                    model,
-                    data,
-                    group_id=step.group_id or "",
-                    team_id=step.options[0].id,
-                )
-            elif step.kind == "third_place":
-                data = record_third_place_qualifiers(
-                    model,
-                    data,
-                    team_ids=[team.id for team in step.options[: step.max_values]],
-                )
-            elif step.kind == "knockout":
-                data = record_knockout_winner(
-                    model,
-                    data,
-                    round_name=step.round_name or "",
-                    match_id=step.match_id or "",
-                    winner_team_id=step.options[0].id,
-                )
+        data = _completed_prediction_data(model)
 
         self.assertTrue(is_submission_complete(model, data))
         self.assertEqual(data["seeded_round_of_32"][12]["home_team_id"], "A3")
@@ -247,6 +329,64 @@ def _session_state(tournament: ActiveTournamentConfig) -> PredictionSessionState
         entry=None,
         data=empty_prediction_data(),
         lock_deadline_utc=None,
+        edit_existing=False,
+    )
+
+
+def _completed_prediction_data(model: TournamentModel) -> dict[str, object]:
+    data = empty_prediction_data()
+    while True:
+        step = next_prediction_step(model, data)
+        if step.kind == "submit":
+            return data
+        if step.kind == "group_pick":
+            data = record_group_pick(
+                model,
+                data,
+                group_id=step.group_id or "",
+                team_id=step.options[0].id,
+            )
+        elif step.kind == "third_place":
+            data = record_third_place_qualifiers(
+                model,
+                data,
+                team_ids=[team.id for team in step.options[: step.max_values]],
+            )
+        elif step.kind == "knockout":
+            data = record_knockout_winner(
+                model,
+                data,
+                round_name=step.round_name or "",
+                match_id=step.match_id or "",
+                winner_team_id=step.options[0].id,
+            )
+
+
+def _prediction_entry(
+    *,
+    draft_data: dict[str, object] | None = None,
+    submitted_data: dict[str, object] | None = None,
+) -> PredictionEntry:
+    return PredictionEntry(
+        id=1,
+        guild_id="guild-1",
+        tournament_config_id=1,
+        user_id="user-1",
+        display_name="User One",
+        draft_data=draft_data or {},
+        submitted_data=submitted_data,
+        revision=1,
+        draft_updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        submitted_at=(
+            datetime(2026, 1, 1, tzinfo=timezone.utc)
+            if submitted_data is not None
+            else None
+        ),
+        submitted_updated_at=(
+            datetime(2026, 1, 1, tzinfo=timezone.utc)
+            if submitted_data is not None
+            else None
+        ),
     )
 
 
@@ -254,9 +394,10 @@ def _prediction_service(
     *,
     settings: GuildSettings,
     tournament: ActiveTournamentConfig | None,
+    entry: PredictionEntry | None = None,
 ) -> tuple[PredictionService, "_FakePredictionRepository"]:
     service = PredictionService(pool=None)
-    predictions = _FakePredictionRepository()
+    predictions = _FakePredictionRepository(entry)
     service.settings = _FakeSettingsRepository(settings)
     service.tournaments = _FakeTournamentRepository(tournament)
     service.predictions = predictions
@@ -280,12 +421,12 @@ class _FakeTournamentRepository:
 
 
 class _FakePredictionRepository:
-    def __init__(self) -> None:
-        self.save_calls = 0
+    def __init__(self, entry: PredictionEntry | None = None) -> None:
+        self.entry = entry
         self.submit_calls = 0
 
-    async def save_draft(self, **kwargs: object) -> None:
-        self.save_calls += 1
+    async def get_entry(self, **kwargs: object) -> PredictionEntry | None:
+        return self.entry
 
-    async def submit_draft(self, **kwargs: object) -> None:
+    async def submit_prediction(self, **kwargs: object) -> None:
         self.submit_calls += 1

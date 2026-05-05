@@ -680,7 +680,7 @@ class PredictionRepository:
 
         return [_row_to_prediction_entry(row) for row in rows]
 
-    async def save_draft(
+    async def submit_prediction(
         self,
         *,
         guild_id: str,
@@ -695,25 +695,6 @@ class PredictionRepository:
             user_id=user_id,
             display_name=display_name,
             data=data,
-            event_type="draft_saved",
-        )
-
-    async def submit_draft(
-        self,
-        *,
-        guild_id: str,
-        tournament_config_id: int,
-        user_id: str,
-        display_name: str,
-        data: dict[str, Any],
-    ) -> PredictionEntry:
-        return await self._write_entry(
-            guild_id=guild_id,
-            tournament_config_id=tournament_config_id,
-            user_id=user_id,
-            display_name=display_name,
-            data=data,
-            event_type="submitted",
         )
 
     async def _write_entry(
@@ -724,10 +705,8 @@ class PredictionRepository:
         user_id: str,
         display_name: str,
         data: dict[str, Any],
-        event_type: str,
     ) -> PredictionEntry:
         data_json = json.dumps(data, sort_keys=True)
-        is_submit = event_type == "submitted"
 
         async with self.pool.acquire() as connection:
             async with connection.transaction():
@@ -750,9 +729,9 @@ class PredictionRepository:
                         $3,
                         $4,
                         $5::jsonb,
-                        case when $6 then $5::jsonb else null end,
-                        case when $6 then now() else null end,
-                        case when $6 then now() else null end,
+                        $5::jsonb,
+                        now(),
+                        now(),
                         1
                     )
                     on conflict (guild_id, tournament_config_id, user_id)
@@ -760,18 +739,9 @@ class PredictionRepository:
                         display_name = excluded.display_name,
                         draft_data = excluded.draft_data,
                         draft_updated_at = now(),
-                        submitted_data = case
-                            when $6 then excluded.draft_data
-                            else prediction_entries.submitted_data
-                        end,
-                        submitted_at = case
-                            when $6 then coalesce(prediction_entries.submitted_at, now())
-                            else prediction_entries.submitted_at
-                        end,
-                        submitted_updated_at = case
-                            when $6 then now()
-                            else prediction_entries.submitted_updated_at
-                        end,
+                        submitted_data = excluded.draft_data,
+                        submitted_at = coalesce(prediction_entries.submitted_at, now()),
+                        submitted_updated_at = now(),
                         revision = prediction_entries.revision + 1
                     returning
                         id,
@@ -791,7 +761,6 @@ class PredictionRepository:
                     user_id,
                     display_name,
                     data_json,
-                    is_submit,
                 )
                 await connection.execute(
                     """
@@ -806,7 +775,7 @@ class PredictionRepository:
                     """,
                     row["id"],
                     row["revision"],
-                    event_type,
+                    "submitted",
                     user_id,
                     data_json,
                 )

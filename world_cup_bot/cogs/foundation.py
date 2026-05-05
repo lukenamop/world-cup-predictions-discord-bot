@@ -17,7 +17,7 @@ class FoundationCog(commands.Cog):
             title="World Cup predictions",
             description=(
                 "The bot is online. Admins can import tournament data and open "
-                "prediction entry; members can build private drafts and submit "
+                "prediction entry; members can complete private sessions and submit "
                 "full brackets before lock."
             ),
             color=discord.Color.blurple(),

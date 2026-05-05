@@ -85,7 +85,11 @@ Prediction flow:
 6. Bot displays a confirmation summary.
 7. Completing the `/predict` flow submits the bracket.
 
-`/edit` updates a submitted bracket until lock. Users should never manually fill the initial Round of 32 bracket.
+The product does not support user-facing saved prediction drafts. A member can
+start `/predict` and submit a completed prediction, or use `/edit` before lock to
+replace an already submitted prediction. Existing submitted picks remain active
+until an edit flow is completed and submitted. Users should never manually fill
+the initial Round of 32 bracket.
 
 ### Locking
 
@@ -165,7 +169,7 @@ Commands should not use a universal `/wc` prefix. Use direct public commands and
 
 Public/user commands:
 
-- `/predict`: starts or resumes prediction entry and submits when completed.
+- `/predict`: starts prediction entry and submits when completed.
 - `/edit`: edits a submitted prediction until lock.
 - `/bracket [user]`: renders a user's 32-team bracket image with a concise summary.
 - `/groups [user]`: renders a user's group-stage prediction image with a concise summary.
@@ -197,7 +201,7 @@ Admin commands require Discord Manage Guild permission by default. Additional us
 
 - Use ephemeral messages for personal prediction entry and noisy admin workflows.
 - Use select menus for group ordering and winner choices.
-- Use buttons for previous, next, save draft, finish, and cancel.
+- Use buttons for previous, next, finish, confirm submission, and cancel.
 - Use embeds for rules, summaries, leaderboards, and concise image fallbacks.
 - Use pagination for large leaderboards.
 - Validate every step before moving users forward.
@@ -246,8 +250,8 @@ Visual design:
 
 - Add `/predict` and `/edit`.
 - Build group and knockout entry flow.
-- Save drafts.
 - Submit completed predictions at the end of `/predict`.
+- Replace existing submitted predictions only when `/edit` is completed and submitted.
 - Enforce lock deadline.
 
 ### 4. Results And Scoring
@@ -312,8 +316,8 @@ Visual design:
 
 ### 10. Prediction UX And Visual Polish
 
-- Add expected prediction-session controls such as previous, next, cancel, save
-  draft, restart, and final confirmation states.
+- Add expected prediction-session controls such as previous, next, cancel, start
+  over, and final confirmation states.
 - Add reminder announcement support and clearer empty/error states for users and
   admins.
 - Render flag assets beside team names in generated group and bracket images.
