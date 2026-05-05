@@ -264,3 +264,71 @@ Visual design:
 - Add generated image views with result highlighting.
 - Add preferences, admin announcement, export, and backup workflows.
 - Tighten errors and documentation.
+
+### 6. Launch Tournament Data
+
+- Replace the placeholder `config/tournaments/2026_world_cup.json` with importable
+  official 2026 tournament data.
+- Include 48 teams, 12 groups, all group fixtures, the Round of 32 bracket
+  template, knockout fixture provider IDs when available, and the full 495-rule
+  third-place allocation table.
+- Include source/version metadata for tournament data, bracket allocation rules,
+  provider match IDs, and committed flag assets.
+- Add validation coverage for the checked-in production tournament file.
+
+### 7. Admin Setup And Guild Configuration
+
+- Add `/admin setup` for prediction channel, leaderboard channel, timezone,
+  initial privacy defaults, scoring defaults, live provider, and lock deadline.
+- Add `/admin config` to view and update scoring rules, privacy defaults, lock
+  mode, live provider, timezone, and configured channels after setup.
+- Make `/admin post` use configured channels by default while still allowing an
+  explicit channel override.
+- Audit every admin change that mutates setup, scoring, privacy, provider, lock,
+  channel, tournament, result, export, or backup state.
+
+### 8. Result Sync Production Hardening
+
+- Make scheduled sync use each guild's configured provider and active tournament
+  config instead of only process-level defaults.
+- Scope latest sync status and prediction image sync metadata to the active
+  tournament config.
+- Persist last successful sync state and enough cached provider response metadata
+  to debug sync gaps without logging secrets.
+- Detect provider result delays beyond the allowed window and log a single warning
+  per delayed match or sync window.
+- Keep result ingestion, recalculation, and manual sync workflows idempotent under
+  repeated runs and partial provider failures.
+
+### 9. Official Standings And Tie Resolution
+
+- Complete group and best-third-place ranking rules against the official
+  tournament tie-breakers.
+- Add a clear admin resolution path for any tie-breaker the bot cannot determine
+  from provider data, such as fair play or drawing lots.
+- Store and audit tie-breaker overrides or adjudications.
+- Add tests for tied group standings, best third-place ordering, unresolved tie
+  handling, and recalculation after adjudication.
+
+### 10. Prediction UX And Visual Polish
+
+- Add expected prediction-session controls such as previous, next, cancel, save
+  draft, restart, and final confirmation states.
+- Add reminder announcement support and clearer empty/error states for users and
+  admins.
+- Render flag assets beside team names in generated group and bracket images.
+- Keep generated images accessible by pairing them with concise embed summaries
+  and status labels that do not rely on color alone.
+- Add visual renderer tests in an environment with Pillow installed and keep image
+  output deterministic enough for regression checks.
+
+### 11. Release Readiness
+
+- Run the full unit suite, tournament validation, health check, and a documented
+  local PostgreSQL smoke test before release.
+- Exercise a Discord staging guild flow end to end: setup, import, open, predict,
+  edit, lock, sync, recalc, leaderboard, views, export, and backup.
+- Confirm production PM2 startup, slash-command sync, required environment
+  variables, and recovery from startup or database failures.
+- Update README and operator docs whenever setup, commands, migrations, provider
+  configuration, scoring, admin workflows, or deployment steps change.
