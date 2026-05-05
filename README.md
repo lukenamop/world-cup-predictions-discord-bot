@@ -77,8 +77,7 @@ Optional environment variables:
 - `LOG_LEVEL`, default `INFO`
 - `OWNER_USER_IDS`, comma-separated Discord IDs
 - `DEFAULT_TIMEZONE`, default `America/Indiana/Indianapolis`
-- `LIVE_RESULTS_PROVIDER`, default `football_data_org`
-- `LIVE_RESULTS_API_KEY`, only when a provider requires it
+- `LIVE_RESULTS_PROVIDER`, default `fifa_public_calendar`
 
 ## Running The Bot
 
@@ -126,9 +125,11 @@ Milestone 2 validation checks that a config has:
 - a Round of 32 bracket template with group-position and third-place slots;
 - a third-place allocation table covering every possible qualifying third-place group set.
 
-Group fixtures may include an optional `provider_match_id`. Knockout provider IDs live in optional `knockout_fixtures` entries with the generated match `id`, `round_name`, and `provider_match_id`. Live sync maps football-data.org match IDs to imported fixtures by `provider_match_id` first and by fixture `id` as a fallback. Store provider IDs as strings.
+Group fixtures may include an optional `provider_match_id`. Knockout provider IDs live in optional `knockout_fixtures` entries with the generated match `id`, `round_name`, and `provider_match_id`. Live sync maps FIFA calendar `IdMatch` values to imported fixtures by `provider_match_id` first and by fixture `id` as a fallback. Store provider IDs as strings.
 
-For the 2026 default format, the third-place allocation table must contain all 495 combinations of 8 qualifying groups from 12 groups. The checked-in `config/tournaments/2026_world_cup.json` is an explicit placeholder and will fail validation until official teams, fixtures, bracket slots, and the local official allocation table are filled in.
+For the 2026 default format, the third-place allocation table must contain all 495 combinations of 8 qualifying groups from 12 groups. The checked-in `config/tournaments/2026_world_cup.json` is importable launch data with 48 teams, 12 groups, 72 group fixtures, a bracket-ordered Round of 32 template, 32 knockout fixture mappings, and the full allocation table. Source/version metadata for FIFA schedule data, bracket rules, third-place allocation, provider match IDs, and flag assets lives under `tournament.source_metadata`.
+
+The checked-in `provider_match_id` values come from FIFA's public calendar `IdMatch` values. Committed SVG flags are stored in `assets/flags/`; source, license, and FIFA-code mapping notes are in `assets/flags/SOURCE.md`.
 
 Validate a tournament file locally:
 
@@ -172,7 +173,7 @@ Champion, runner-up, third-place picks, and available point totals remain visibl
 
 ## Results And Scoring
 
-Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `football_data_org`. For football-data.org, set `LIVE_RESULTS_API_KEY`; the bot calls the v4 competition matches endpoint for the tournament start year and stores any provider matches that map to imported fixture IDs.
+Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `fifa_public_calendar`. The FIFA provider calls the public calendar matches endpoint for the imported tournament date window and stores any provider matches that map to imported fixture IDs.
 
 Manual sync:
 
@@ -180,7 +181,7 @@ Manual sync:
 /admin sync run:True
 ```
 
-The bot also starts a 30-minute background sync loop when `LIVE_RESULTS_API_KEY` is configured. Each sync writes `match_results` and `result_sync_runs`, then recalculates scores for submitted predictions.
+The bot also starts a 30-minute background sync loop after startup. Each sync writes `match_results` and `result_sync_runs`, then recalculates scores for submitted predictions.
 
 Manual recalculation without fetching new provider data:
 

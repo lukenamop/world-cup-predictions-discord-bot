@@ -5,7 +5,7 @@ create table if not exists guild_settings (
     timezone text not null default 'America/Indiana/Indianapolis',
     scoring_rules jsonb not null default '{}'::jsonb,
     privacy_defaults jsonb not null default '{"share_full_bracket": false}'::jsonb,
-    live_results_provider text not null default 'football_data_org',
+    live_results_provider text not null default 'fifa_public_calendar',
     lock_mode text not null default 'full_bracket_lock',
     lock_deadline_utc timestamptz,
     predictions_open boolean not null default false,

@@ -18,7 +18,11 @@ from world_cup_bot.domain.standings import (
     best_third_place_qualifiers,
     compute_group_standings,
 )
-from world_cup_bot.services.live_results_client import LiveMatchResult
+from world_cup_bot.services.live_results_client import (
+    FifaPublicCalendarClient,
+    LiveMatchResult,
+    _parse_fifa_match,
+)
 from world_cup_bot.services.result_sync_service import (
     ResultSyncService,
     ResultSyncServiceError,
@@ -134,6 +138,72 @@ class ScoringTests(unittest.TestCase):
 
 
 class ResultSyncMappingTests(unittest.TestCase):
+    def test_fifa_public_calendar_url_uses_config_metadata(self) -> None:
+        url = FifaPublicCalendarClient(
+            base_url="https://example.test",
+            match_count=104,
+        )._matches_url(
+            {
+                "tournament": {
+                    "start_date": "2026-06-11",
+                    "end_date": "2026-07-19",
+                    "source_metadata": {
+                        "tournament_data": {"competition_id": "17"}
+                    },
+                }
+            }
+        )
+
+        self.assertIn("https://example.test/calendar/matches?", url)
+        self.assertIn("from=2026-06-11T00%3A00%3A00Z", url)
+        self.assertIn("to=2026-07-19T23%3A59%3A59Z", url)
+        self.assertIn("count=104", url)
+        self.assertIn("idCompetition=17", url)
+
+    def test_fifa_public_calendar_url_falls_back_to_fixture_dates(self) -> None:
+        url = FifaPublicCalendarClient(
+            base_url="https://example.test",
+            match_count=104,
+        )._matches_url(
+            {
+                "tournament": {
+                    "source_metadata": {
+                        "tournament_data": {"competition_id": "17"}
+                    },
+                },
+                "fixtures": [
+                    {"kickoff_utc": "2026-06-12T02:00:00Z"},
+                    {"kickoff_utc": "2026-06-11T19:00:00Z"},
+                ],
+                "knockout_fixtures": [
+                    {"kickoff_utc": "2026-07-19T19:00:00Z"},
+                ],
+            }
+        )
+
+        self.assertIn("from=2026-06-11T00%3A00%3A00Z", url)
+        self.assertIn("to=2026-07-19T23%3A59%3A59Z", url)
+
+    def test_fifa_public_calendar_parser_maps_result_fields(self) -> None:
+        live_result = _parse_fifa_match(
+            {
+                "IdMatch": "400128082",
+                "Date": "2022-11-20T16:00:00Z",
+                "HomeTeamScore": 0,
+                "AwayTeamScore": 2,
+                "Winner": "43927",
+                "MatchStatus": 0,
+                "Home": {"IdTeam": "43834", "Score": 0},
+                "Away": {"IdTeam": "43927", "Score": 2},
+            }
+        )
+
+        self.assertEqual(live_result.provider_match_id, "400128082")
+        self.assertEqual(live_result.status, "FINISHED")
+        self.assertEqual(live_result.home_score, 0)
+        self.assertEqual(live_result.away_score, 2)
+        self.assertEqual(live_result.winner_side, "AWAY_TEAM")
+
     def test_live_results_map_by_provider_match_id(self) -> None:
         config = {
             "fixtures": [
@@ -160,7 +230,7 @@ class ResultSyncMappingTests(unittest.TestCase):
         ]
 
         stored, skipped = _map_live_results(
-            provider_name="football_data_org",
+            provider_name="fifa_public_calendar",
             tournament_config=config,
             live_results=live,
         )
@@ -216,7 +286,7 @@ class ResultSyncMappingTests(unittest.TestCase):
         )
 
         stored, skipped = _map_live_results(
-            provider_name="football_data_org",
+            provider_name="fifa_public_calendar",
             tournament_config=config,
             live_results=live_results,
         )
@@ -293,7 +363,7 @@ class ResultSyncMappingTests(unittest.TestCase):
         )
 
         stored, skipped = _map_live_results(
-            provider_name="football_data_org",
+            provider_name="fifa_public_calendar",
             tournament_config=config,
             live_results=live_results,
         )
@@ -309,7 +379,6 @@ class ResultSyncServiceTests(unittest.IsolatedAsyncioTestCase):
         service = ResultSyncService(
             object(),
             provider_name="unsupported_provider",
-            api_key=None,
         )
         service.tournaments = _ActiveTournamentRepo()
         service.results = _UnexpectedResultRepo()

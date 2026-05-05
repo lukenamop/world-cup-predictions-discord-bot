@@ -61,10 +61,7 @@ async def run_bot() -> None:
             len(bot.guilds),
             bot.command_sync_status,
         )
-        if (
-            settings.live_results_api_key
-            and not result_sync_loop.is_running()
-        ):
+        if not result_sync_loop.is_running():
             result_sync_loop.start()
             LOGGER.info("Result sync job started; interval_minutes=30")
 

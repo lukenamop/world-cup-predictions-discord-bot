@@ -93,6 +93,74 @@ class TournamentValidationTests(unittest.TestCase):
             ):
                 load_tournament_config(root / "outside.json", project_root=root)
 
+    def test_checked_in_2026_world_cup_config_is_importable(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+
+        imported = load_tournament_config(
+            "config/tournaments/2026_world_cup.json",
+            project_root=project_root,
+        )
+
+        report = imported.validation
+        self.assertTrue(report.valid, report.errors)
+        self.assertIsNotNone(report.summary)
+        self.assertEqual(report.summary.team_count, 48)
+        self.assertEqual(report.summary.group_count, 12)
+        self.assertEqual(report.summary.fixture_count, 72)
+        self.assertEqual(report.summary.opening_knockout_matches, 16)
+        self.assertEqual(report.summary.third_place_rule_count, 495)
+        self.assertEqual(len(imported.config.get("knockout_fixtures", [])), 32)
+        self.assertEqual(
+            [match["id"] for match in imported.config["bracket"]["round_of_32"]],
+            [
+                "M074",
+                "M077",
+                "M073",
+                "M075",
+                "M083",
+                "M084",
+                "M081",
+                "M082",
+                "M076",
+                "M078",
+                "M079",
+                "M080",
+                "M086",
+                "M088",
+                "M085",
+                "M087",
+            ],
+        )
+        provider_ids = {
+            fixture["provider_match_id"]
+            for fixture in imported.config["fixtures"]
+            + imported.config["knockout_fixtures"]
+        }
+        self.assertEqual(len(provider_ids), 104)
+
+        tournament = imported.config["tournament"]
+        self.assertIsInstance(tournament, dict)
+        source_metadata = tournament.get("source_metadata")
+        self.assertIsInstance(source_metadata, dict)
+        for key in (
+            "tournament_data",
+            "bracket_template",
+            "third_place_allocation",
+            "provider_match_ids",
+            "flag_assets",
+        ):
+            self.assertIn(key, source_metadata)
+
+        for team in imported.config["teams"]:
+            self.assertIsInstance(team, dict)
+            flag_asset = team.get("flag_asset")
+            self.assertIsInstance(flag_asset, str)
+            self.assertTrue((project_root / flag_asset).is_file(), flag_asset)
+        self.assertTrue((project_root / "assets" / "flags" / "SOURCE.md").is_file())
+        self.assertTrue(
+            (project_root / "assets" / "flags" / "LICENSE.flag-icons").is_file()
+        )
+
 
 def _valid_config() -> dict[str, object]:
     return {

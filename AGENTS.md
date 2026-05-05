@@ -102,8 +102,8 @@ Environment variables:
 - `LOG_LEVEL`
 - `OWNER_USER_IDS`
 - `DEFAULT_TIMEZONE`
-- `LIVE_RESULTS_PROVIDER` defaulting to `football_data_org`
-- Provider-specific credentials such as `LIVE_RESULTS_API_KEY` only when required
+- `LIVE_RESULTS_PROVIDER` defaulting to `fifa_public_calendar`
+- Provider-specific credentials only when required
 
 Only add Discord application values beyond `DISCORD_TOKEN` when implementation actually requires them.
 

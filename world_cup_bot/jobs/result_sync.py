@@ -26,7 +26,6 @@ async def sync_all_active_guilds(bot: Any) -> None:
             summary = await ResultSyncService(
                 bot.database.pool,
                 provider_name=bot.settings.live_results_provider,
-                api_key=bot.settings.live_results_api_key,
             ).sync_guild(guild_id=guild_id)
             recalculation = await LeaderboardService(bot.database.pool).recalculate(
                 guild_id=guild_id

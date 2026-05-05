@@ -26,7 +26,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.log_level, "INFO")
         self.assertEqual(settings.owner_user_ids, frozenset({"123", "456"}))
         self.assertEqual(settings.default_timezone, "America/Indiana/Indianapolis")
-        self.assertEqual(settings.live_results_provider, "football_data_org")
+        self.assertEqual(settings.live_results_provider, "fifa_public_calendar")
 
     def test_invalid_timezone_fails_clearly(self) -> None:
         with self.assertRaisesRegex(SettingsError, "Invalid DEFAULT_TIMEZONE"):

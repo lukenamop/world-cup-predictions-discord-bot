@@ -300,7 +300,7 @@ def _guild_settings(
     return GuildSettings(
         guild_id="guild-1",
         timezone="UTC",
-        live_results_provider="football_data_org",
+        live_results_provider="fifa_public_calendar",
         lock_deadline_utc=lock_deadline_utc,
         predictions_open=predictions_open,
     )

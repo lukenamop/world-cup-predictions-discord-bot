@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 DEFAULT_TIMEZONE = "America/Indiana/Indianapolis"
-DEFAULT_LIVE_RESULTS_PROVIDER = "football_data_org"
+DEFAULT_LIVE_RESULTS_PROVIDER = "fifa_public_calendar"
 VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
 
@@ -25,7 +25,6 @@ class AppSettings:
     owner_user_ids: frozenset[str]
     default_timezone: str
     live_results_provider: str
-    live_results_api_key: str | None
 
     @classmethod
     def from_env(
@@ -67,7 +66,6 @@ class AppSettings:
                 _clean(source.get("LIVE_RESULTS_PROVIDER"))
                 or DEFAULT_LIVE_RESULTS_PROVIDER
             ),
-            live_results_api_key=_clean(source.get("LIVE_RESULTS_API_KEY")),
         )
 
     @property

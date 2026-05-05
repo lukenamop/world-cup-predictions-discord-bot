@@ -32,42 +32,56 @@ class LiveResultsClient(Protocol):
         ...
 
 
-class FootballDataOrgClient:
-    provider_name = "football_data_org"
+class FifaPublicCalendarClient:
+    provider_name = "fifa_public_calendar"
 
     def __init__(
         self,
         *,
-        api_key: str,
-        base_url: str = "https://api.football-data.org/v4",
-        competition_code: str = "WC",
+        base_url: str = "https://api.fifa.com/api/v3",
+        language: str = "en",
+        match_count: int = 500,
         timeout_seconds: int = 20,
         max_attempts: int = 3,
     ) -> None:
-        self.api_key = api_key
         self.base_url = base_url.rstrip("/")
-        self.competition_code = competition_code
+        self.language = language
+        self.match_count = match_count
         self.timeout_seconds = timeout_seconds
         self.max_attempts = max(1, max_attempts)
 
     async def fetch_matches(self, tournament_config: Mapping[str, Any]) -> list[LiveMatchResult]:
-        if not self.api_key:
-            raise LiveResultsError("LIVE_RESULTS_API_KEY is required for football-data.org sync.")
-
-        season = _tournament_start_year(tournament_config)
-        query = urlencode({"season": season}) if season else ""
-        url = f"{self.base_url}/competitions/{self.competition_code}/matches"
-        if query:
-            url = f"{url}?{query}"
+        url = self._matches_url(tournament_config)
         return await asyncio.to_thread(self._fetch_matches_sync, url)
+
+    def _matches_url(self, tournament_config: Mapping[str, Any]) -> str:
+        tournament = _mapping(tournament_config.get("tournament"))
+        metadata = _mapping(tournament.get("source_metadata"))
+        tournament_data = _mapping(metadata.get("tournament_data"))
+        competition_id = str(tournament_data.get("competition_id") or "17")
+        query = urlencode(
+            {
+                "language": self.language,
+                "from": _tournament_date_boundary(
+                    tournament_config,
+                    "start_date",
+                    start=True,
+                ),
+                "to": _tournament_date_boundary(
+                    tournament_config,
+                    "end_date",
+                    start=False,
+                ),
+                "count": self.match_count,
+                "idCompetition": competition_id,
+            }
+        )
+        return f"{self.base_url}/calendar/matches?{query}"
 
     def _fetch_matches_sync(self, url: str) -> list[LiveMatchResult]:
         request = Request(
             url,
-            headers={
-                "Accept": "application/json",
-                "X-Auth-Token": self.api_key,
-            },
+            headers={"Accept": "application/json"},
         )
         payload: Any = None
         for attempt in range(1, self.max_attempts + 1):
@@ -77,54 +91,92 @@ class FootballDataOrgClient:
                 break
             except HTTPError as exc:
                 if attempt >= self.max_attempts or exc.code not in {429, 500, 502, 503, 504}:
-                    raise LiveResultsError(f"football-data.org returned HTTP {exc.code}.") from exc
+                    raise LiveResultsError(f"FIFA calendar returned HTTP {exc.code}.") from exc
                 _sleep_for_backoff(exc, attempt)
             except (URLError, TimeoutError) as exc:
                 if attempt >= self.max_attempts:
-                    raise LiveResultsError("football-data.org sync request failed.") from exc
+                    raise LiveResultsError("FIFA calendar sync request failed.") from exc
                 _sleep_for_backoff(None, attempt)
             except json.JSONDecodeError as exc:
-                raise LiveResultsError("football-data.org returned invalid JSON.") from exc
+                raise LiveResultsError("FIFA calendar returned invalid JSON.") from exc
 
-        matches = payload.get("matches")
+        matches = payload.get("Results")
         if not isinstance(matches, list):
-            raise LiveResultsError("football-data.org response did not include matches.")
+            raise LiveResultsError("FIFA calendar response did not include matches.")
 
-        return [_parse_football_data_match(match) for match in matches if isinstance(match, Mapping)]
+        return [_parse_fifa_match(match) for match in matches if isinstance(match, Mapping)]
 
 
 def create_live_results_client(
     *,
     provider_name: str,
-    api_key: str | None,
 ) -> LiveResultsClient:
-    if provider_name == FootballDataOrgClient.provider_name:
-        return FootballDataOrgClient(api_key=api_key or "")
+    if provider_name == FifaPublicCalendarClient.provider_name:
+        return FifaPublicCalendarClient()
     raise LiveResultsError(f"Unsupported live results provider: {provider_name}")
 
 
-def _parse_football_data_match(raw_match: Mapping[str, Any]) -> LiveMatchResult:
-    score = raw_match.get("score") if isinstance(raw_match.get("score"), Mapping) else {}
-    full_time = score.get("fullTime") if isinstance(score.get("fullTime"), Mapping) else {}
+def _parse_fifa_match(raw_match: Mapping[str, Any]) -> LiveMatchResult:
+    home = _mapping(raw_match.get("Home"))
+    away = _mapping(raw_match.get("Away"))
+    home_score = _optional_int(raw_match.get("HomeTeamScore"))
+    away_score = _optional_int(raw_match.get("AwayTeamScore"))
     return LiveMatchResult(
-        provider_match_id=str(raw_match.get("id") or ""),
-        status=str(raw_match.get("status") or "UNKNOWN"),
-        home_score=_optional_int(full_time.get("home")),
-        away_score=_optional_int(full_time.get("away")),
-        played_at=_parse_utc_datetime(raw_match.get("utcDate")),
-        winner_side=_winner_side(score.get("winner")),
+        provider_match_id=str(raw_match.get("IdMatch") or ""),
+        status=_fifa_status(raw_match),
+        home_score=home_score if home_score is not None else _optional_int(home.get("Score")),
+        away_score=away_score if away_score is not None else _optional_int(away.get("Score")),
+        played_at=_parse_utc_datetime(raw_match.get("Date")),
+        winner_side=_fifa_winner_side(
+            raw_match.get("Winner"),
+            home.get("IdTeam"),
+            away.get("IdTeam"),
+        ),
         payload=dict(raw_match),
     )
 
 
-def _tournament_start_year(config: Mapping[str, Any]) -> str | None:
-    tournament = config.get("tournament")
-    if not isinstance(tournament, Mapping):
-        return None
-    start_date = tournament.get("start_date")
-    if not isinstance(start_date, str) or len(start_date) < 4:
-        return None
-    return start_date[:4]
+def _tournament_date_boundary(
+    tournament_config: Mapping[str, Any],
+    key: str,
+    *,
+    start: bool,
+) -> str:
+    tournament = _mapping(tournament_config.get("tournament"))
+    value = tournament.get(key)
+    if value is not None:
+        if not isinstance(value, str) or len(value) < 10:
+            raise LiveResultsError(f"FIFA sync requires tournament.{key}.")
+        return _format_date_boundary(value[:10], start=start)
+
+    kickoff_dates = _fixture_kickoff_dates(tournament_config)
+    if not kickoff_dates:
+        raise LiveResultsError(
+            f"FIFA sync requires tournament.{key} or fixture kickoff_utc values."
+        )
+    date_value = min(kickoff_dates) if start else max(kickoff_dates)
+    return _format_date_boundary(date_value, start=start)
+
+
+def _format_date_boundary(date_value: str, *, start: bool) -> str:
+    suffix = "T00:00:00Z" if start else "T23:59:59Z"
+    return f"{date_value}{suffix}"
+
+
+def _fixture_kickoff_dates(tournament_config: Mapping[str, Any]) -> list[str]:
+    dates: list[str] = []
+    for fixture_group in ("fixtures", "knockout_fixtures"):
+        raw_fixtures = tournament_config.get(fixture_group)
+        if not isinstance(raw_fixtures, list):
+            continue
+        for fixture in raw_fixtures:
+            if not isinstance(fixture, Mapping):
+                continue
+            kickoff = fixture.get("kickoff_utc")
+            parsed = _parse_utc_datetime(kickoff)
+            if parsed is not None:
+                dates.append(parsed.date().isoformat())
+    return dates
 
 
 def _parse_utc_datetime(value: object) -> datetime | None:
@@ -144,8 +196,32 @@ def _optional_int(value: object) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _winner_side(value: object) -> str | None:
-    return value if value in {"HOME_TEAM", "AWAY_TEAM"} else None
+def _fifa_status(raw_match: Mapping[str, Any]) -> str:
+    match_status = _optional_int(raw_match.get("MatchStatus"))
+    if match_status == 0:
+        return "FINISHED"
+    if match_status == 1:
+        return "SCHEDULED"
+    if any(raw_match.get(key) for key in ("MatchTime", "FirstHalfTime", "SecondHalfTime")):
+        return "IN_PLAY"
+    return "UNKNOWN"
+
+
+def _fifa_winner_side(
+    winner_team_id: object,
+    home_fifa_team_id: object,
+    away_fifa_team_id: object,
+) -> str | None:
+    winner = str(winner_team_id) if winner_team_id else ""
+    if winner and winner == str(home_fifa_team_id):
+        return "HOME_TEAM"
+    if winner and winner == str(away_fifa_team_id):
+        return "AWAY_TEAM"
+    return None
+
+
+def _mapping(value: object) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
 
 
 def _sleep_for_backoff(error: HTTPError | None, attempt: int) -> None:

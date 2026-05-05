@@ -99,7 +99,7 @@ All predictions lock before the tournament starts. MVP lock mode is `full_bracke
 
 Official group and knockout results update automatically from a configured live data source.
 
-Preferred default provider: football-data.org. Its free tier lists scores as delayed but does not publish a guaranteed delay. Free-tier data is acceptable if observed result delay stays under 6 hours; if a score is delayed longer, log a single warning for that match or sync window to avoid warning floods. The product should allow upgrading to football-data.org live scores without changing user-facing behavior.
+Preferred default provider: FIFA public calendar. It exposes the tournament fixture IDs used by the checked-in config and publishes score, status, and winner fields through the same calendar match feed. Public data is acceptable if observed result delay stays under 6 hours; if a score is delayed longer, log a single warning for that match or sync window to avoid warning floods.
 
 Admins can trigger a manual sync or recalculation, but normal operation should not require manual result entry.
 

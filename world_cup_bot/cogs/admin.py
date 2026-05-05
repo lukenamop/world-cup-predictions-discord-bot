@@ -274,7 +274,6 @@ class AdminCog(commands.Cog):
         sync_service = ResultSyncService(
             self.bot.database.pool,
             provider_name=self.bot.settings.live_results_provider,
-            api_key=self.bot.settings.live_results_api_key,
         )
         try:
             summary = await sync_service.sync_guild(guild_id=guild_id)
