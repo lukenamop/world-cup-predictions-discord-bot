@@ -14,11 +14,6 @@ dependencies = [
   "py-cord>=2.5,<3.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-  "pytest>=8.0,<9.0",
-]
-
 [project.scripts]
 world-cup-bot = "world_cup_bot.bot:main"
 
@@ -27,8 +22,3 @@ include = ["world_cup_bot*"]
 
 [tool.setuptools.package-data]
 world_cup_bot = ["data/migrations/*.sql"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
-addopts = "-q"

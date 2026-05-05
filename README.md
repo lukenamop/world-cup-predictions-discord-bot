@@ -231,5 +231,5 @@ Migrations are plain numbered SQL files in `world_cup_bot/data/migrations`. They
 
 ```bash
 . .venv/bin/activate
-pytest
+python -m unittest discover tests
 ```
