@@ -15,6 +15,7 @@ LOGGER = logging.getLogger(__name__)
 COGS = (
     "world_cup_bot.cogs.foundation",
     "world_cup_bot.cogs.admin",
+    "world_cup_bot.cogs.operator",
     "world_cup_bot.cogs.predictions",
     "world_cup_bot.cogs.leaderboard",
 )
@@ -80,9 +81,10 @@ async def run_bot() -> None:
             LOGGER.exception("Failed to send application command error response")
 
     LOGGER.info(
-        "Starting bot; database=%s owner_count=%s provider=%s",
+        "Starting bot; database=%s owner_count=%s operator_guild=%s provider=%s",
         settings.database_log_target,
         len(settings.owner_user_ids),
+        settings.operator_guild_id or "<unset>",
         settings.live_results_provider,
     )
 

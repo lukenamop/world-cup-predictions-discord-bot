@@ -16,7 +16,7 @@ class FoundationCog(commands.Cog):
         embed = discord.Embed(
             title="World Cup predictions",
             description=(
-                "The bot is online. Admins can import tournament data and open "
+                "The bot is online. Admins can configure a league and open "
                 "prediction entry; members can complete private sessions and submit "
                 "full brackets before lock."
             ),
@@ -33,8 +33,8 @@ class FoundationCog(commands.Cog):
             value=(
                 "`/predict`, `/edit`, `/prediction`, `/groups`, `/bracket`, "
                 "`/preferences`, `/leaderboard`, `/rank`, `/points`, `/rules`, "
-                "`/admin setup`, `/admin config`, `/admin status`, `/admin import`, "
-                "`/admin open`, `/admin close`, `/admin lock`, `/admin sync`, `/admin recalc`, `/admin post`, "
+                "`/admin setup`, `/admin config`, `/admin status`, "
+                "`/admin open`, `/admin close`, `/admin lock`, `/admin recalc`, `/admin post`, "
                 "`/admin export`, `/admin backup`"
             ),
             inline=False,

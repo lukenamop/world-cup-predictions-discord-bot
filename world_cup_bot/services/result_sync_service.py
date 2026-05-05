@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from datetime import datetime, timedelta, timezone
+import logging
+from typing import Any, Mapping, Sequence
 
 from world_cup_bot.data.repositories import (
+    ActiveTournamentConfig,
+    GuildActiveTournamentConfig,
     ResultRepository,
     ResultSyncRun,
     StoredMatchResult,
@@ -26,6 +29,10 @@ from world_cup_bot.services.live_results_client import (
 )
 
 
+LOGGER = logging.getLogger(__name__)
+RESULT_DELAY_ALLOWANCE = timedelta(hours=6)
+
+
 class ResultSyncServiceError(RuntimeError):
     """Raised when result sync cannot run for a guild."""
 
@@ -37,6 +44,15 @@ class ResultSyncSummary:
     applied_match_count: int
     skipped_match_count: int
     warning_count: int
+
+
+@dataclass(frozen=True)
+class LiveResultsFetch:
+    provider_name: str
+    tournament_id: str
+    config_hash: str
+    live_results: list[LiveMatchResult]
+    provider_response_cache_id: int | None
 
 
 class ResultSyncService:
@@ -55,21 +71,68 @@ class ResultSyncService:
     async def sync_guild(self, *, guild_id: str) -> ResultSyncSummary:
         tournament = await self.tournaments.get_active_config(guild_id)
         if tournament is None:
-            raise ResultSyncServiceError("Ask an admin to import tournament data first.")
+            raise ResultSyncServiceError("Run `/admin setup` to attach tournament data first.")
 
+        fetched = await self.fetch_matches(tournament=tournament)
+        return await self.sync_guild_from_fetch(
+            guild_id=guild_id,
+            tournament=tournament,
+            fetched=fetched,
+        )
+
+    async def fetch_matches(
+        self,
+        *,
+        tournament: ActiveTournamentConfig | GuildActiveTournamentConfig,
+    ) -> LiveResultsFetch:
         client = self._client()
+        try:
+            live_results = await client.fetch_matches(tournament.config)
+        except LiveResultsError as exc:
+            raise ResultSyncServiceError(str(exc)) from exc
+
+        cache_id = await self.results.save_provider_response_cache(
+            provider=client.provider_name,
+            tournament_id=tournament.tournament_id,
+            config_hash=tournament.config_hash,
+            fetched_match_count=len(live_results),
+            request_metadata=_provider_request_metadata(tournament.config),
+            response_payload={
+                "matches": [result.payload for result in live_results],
+            },
+        )
+        return LiveResultsFetch(
+            provider_name=client.provider_name,
+            tournament_id=tournament.tournament_id,
+            config_hash=tournament.config_hash,
+            live_results=live_results,
+            provider_response_cache_id=cache_id,
+        )
+
+    async def sync_guild_from_fetch(
+        self,
+        *,
+        guild_id: str,
+        tournament: ActiveTournamentConfig | GuildActiveTournamentConfig,
+        fetched: LiveResultsFetch,
+    ) -> ResultSyncSummary:
         sync_run_id = await self.results.start_sync_run(
             guild_id=guild_id,
             tournament_config_id=tournament.id,
-            provider=client.provider_name,
+            provider=fetched.provider_name,
         )
 
         try:
-            live_results = await client.fetch_matches(tournament.config)
             stored, skipped = _map_live_results(
-                provider_name=client.provider_name,
+                provider_name=fetched.provider_name,
                 tournament_config=tournament.config,
-                live_results=live_results,
+                live_results=fetched.live_results,
+            )
+            delay_warnings = await self._record_delay_warnings(
+                provider_name=fetched.provider_name,
+                config_hash=tournament.config_hash,
+                tournament_config=tournament.config,
+                live_results=fetched.live_results,
             )
             applied = await self.results.upsert_match_results(
                 guild_id=guild_id,
@@ -79,19 +142,26 @@ class ResultSyncService:
             sync_run = await self.results.finish_sync_run(
                 sync_run_id=sync_run_id,
                 status="succeeded",
-                fetched_match_count=len(live_results),
+                fetched_match_count=len(fetched.live_results),
                 applied_match_count=applied,
-                warning_count=len(skipped),
-                details={"skipped_provider_match_ids": skipped[:25]},
+                warning_count=len(skipped) + len(delay_warnings),
+                details={
+                    "provider_response_cache_id": fetched.provider_response_cache_id,
+                    "skipped_provider_match_ids": skipped[:25],
+                    "delayed_provider_match_ids": delay_warnings[:25],
+                },
             )
-        except LiveResultsError as exc:
+        except Exception as exc:
             sync_run = await self.results.finish_sync_run(
                 sync_run_id=sync_run_id,
                 status="failed",
-                fetched_match_count=0,
+                fetched_match_count=len(fetched.live_results),
                 applied_match_count=0,
                 warning_count=1,
-                details={"error": str(exc)},
+                details={
+                    "provider_response_cache_id": fetched.provider_response_cache_id,
+                    "error": str(exc),
+                },
             )
             raise ResultSyncServiceError(str(exc)) from exc
 
@@ -103,8 +173,67 @@ class ResultSyncService:
             warning_count=sync_run.warning_count,
         )
 
+    async def record_fetch_failure(
+        self,
+        *,
+        tournament: GuildActiveTournamentConfig,
+        provider_name: str,
+        error: str,
+    ) -> ResultSyncRun:
+        sync_run_id = await self.results.start_sync_run(
+            guild_id=tournament.guild_id,
+            tournament_config_id=tournament.id,
+            provider=provider_name,
+        )
+        return await self.results.finish_sync_run(
+            sync_run_id=sync_run_id,
+            status="failed",
+            fetched_match_count=0,
+            applied_match_count=0,
+            warning_count=1,
+            details={"error": error},
+        )
+
     async def latest_sync_run(self, *, guild_id: str) -> ResultSyncRun | None:
-        return await self.results.latest_sync_run(guild_id=guild_id)
+        tournament = await self.tournaments.get_active_config(guild_id)
+        if tournament is None:
+            return None
+        return await self.results.latest_sync_run(
+            guild_id=guild_id,
+            tournament_config_id=tournament.id,
+        )
+
+    async def _record_delay_warnings(
+        self,
+        *,
+        provider_name: str,
+        config_hash: str,
+        tournament_config: Mapping[str, Any],
+        live_results: Sequence[LiveMatchResult],
+    ) -> list[str]:
+        delayed = _delayed_provider_match_ids(
+            tournament_config=tournament_config,
+            live_results=live_results,
+        )
+        newly_logged: list[str] = []
+        for details in delayed:
+            inserted = await self.results.record_delay_warning_once(
+                provider=provider_name,
+                config_hash=config_hash,
+                provider_match_id=details["provider_match_id"],
+                details=details,
+            )
+            if inserted:
+                LOGGER.warning(
+                    "Live result provider delay detected; provider=%s match_id=%s provider_match_id=%s kickoff_utc=%s status=%s",
+                    provider_name,
+                    details["match_id"],
+                    details["provider_match_id"],
+                    details["kickoff_utc"],
+                    details["status"],
+                )
+                newly_logged.append(details["provider_match_id"])
+        return newly_logged
 
     def _client(self) -> LiveResultsClient:
         try:
@@ -281,6 +410,70 @@ def _fixture_lookup(raw_fixtures: object) -> dict[str, Mapping[str, Any]]:
         if isinstance(provider_match_id, str):
             lookup[provider_match_id] = fixture
     return lookup
+
+
+def _provider_request_metadata(tournament_config: Mapping[str, Any]) -> dict[str, Any]:
+    tournament = tournament_config.get("tournament")
+    if not isinstance(tournament, Mapping):
+        return {}
+    metadata = tournament.get("source_metadata")
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    tournament_data = metadata.get("tournament_data")
+    if not isinstance(tournament_data, Mapping):
+        tournament_data = {}
+    return {
+        "tournament_id": tournament.get("id"),
+        "start_date": tournament.get("start_date"),
+        "end_date": tournament.get("end_date"),
+        "competition_id": tournament_data.get("competition_id"),
+    }
+
+
+def _delayed_provider_match_ids(
+    *,
+    tournament_config: Mapping[str, Any],
+    live_results: Sequence[LiveMatchResult],
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    checked_at = now or datetime.now(timezone.utc)
+    live_by_provider_id = {
+        live_result.provider_match_id: live_result
+        for live_result in live_results
+        if live_result.provider_match_id
+    }
+    delayed: list[dict[str, Any]] = []
+    for fixture in _all_fixtures(tournament_config):
+        provider_match_id = fixture.get("provider_match_id")
+        if not isinstance(provider_match_id, str) or not provider_match_id:
+            continue
+        kickoff = _fixture_kickoff(fixture)
+        if kickoff is None or checked_at <= kickoff + RESULT_DELAY_ALLOWANCE:
+            continue
+        live_result = live_by_provider_id.get(provider_match_id)
+        status = live_result.status if live_result else "MISSING"
+        if status in FINISHED_STATUSES:
+            continue
+        delayed.append(
+            {
+                "match_id": str(fixture.get("id") or ""),
+                "provider_match_id": provider_match_id,
+                "kickoff_utc": kickoff.isoformat(),
+                "status": status,
+                "checked_at": checked_at.isoformat(),
+            }
+        )
+    return delayed
+
+
+def _all_fixtures(tournament_config: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    fixtures: list[Mapping[str, Any]] = []
+    for key in ("fixtures", "knockout_fixtures"):
+        raw = tournament_config.get(key)
+        if not isinstance(raw, list):
+            continue
+        fixtures.extend(fixture for fixture in raw if isinstance(fixture, Mapping))
+    return fixtures
 
 
 def _winner_team_id(

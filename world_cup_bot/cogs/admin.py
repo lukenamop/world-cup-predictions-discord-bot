@@ -12,7 +12,6 @@ from discord.ext import commands
 from world_cup_bot.data.repositories import (
     AuditLogRepository,
     GuildSettingsRepository,
-    ResultRepository,
     TournamentConfigRepository,
 )
 from world_cup_bot.domain.scoring import ScoringRules
@@ -21,12 +20,7 @@ from world_cup_bot.services.leaderboard_service import (
     LeaderboardService,
     LeaderboardServiceError,
 )
-from world_cup_bot.services.result_sync_service import (
-    ResultSyncService,
-    ResultSyncServiceError,
-)
 from world_cup_bot.services.tournament_import import (
-    DEFAULT_TOURNAMENT_PATH,
     TournamentImportError,
     load_tournament_config,
 )
@@ -118,12 +112,22 @@ class AdminCog(commands.Cog):
             action="guild_setup_updated",
             details=_settings_audit_details(saved_settings=settings, existing=existing),
         )
+        try:
+            tournament = await _ensure_canonical_tournament_config(
+                self.bot.database.pool,
+                guild_id=guild_id,
+                actor_user_id=str(ctx.author.id),
+            )
+        except TournamentImportError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
 
         await ctx.respond(
             embed=_setup_embed(
                 settings=saved,
                 title="Prediction league setup saved",
                 live_provider=self.bot.settings.live_results_provider,
+                tournament=tournament,
             ),
             ephemeral=True,
         )
@@ -258,12 +262,22 @@ class AdminCog(commands.Cog):
             action="guild_config_updated",
             details=_settings_audit_details(saved_settings=settings, existing=existing),
         )
+        try:
+            tournament = await _ensure_canonical_tournament_config(
+                self.bot.database.pool,
+                guild_id=guild_id,
+                actor_user_id=str(ctx.author.id),
+            )
+        except TournamentImportError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
 
         await ctx.respond(
             embed=_setup_embed(
                 settings=saved,
                 title="Prediction league configuration updated",
                 live_provider=self.bot.settings.live_results_provider,
+                tournament=tournament,
             ),
             ephemeral=True,
         )
@@ -380,161 +394,6 @@ class AdminCog(commands.Cog):
         )
         await ctx.respond(
             f"Prediction lock deadline: {_format_lock_deadline(settings.lock_deadline_utc)}.",
-            ephemeral=True,
-        )
-
-    @admin.command(
-        name="import",
-        description="Validate and import a tournament config from config/.",
-    )
-    async def import_command(
-        self,
-        ctx: discord.ApplicationContext,
-        path: str = str(DEFAULT_TOURNAMENT_PATH),
-        validate_only: bool = False,
-    ) -> None:
-        if not await self._ensure_admin(ctx):
-            return
-
-        try:
-            imported = load_tournament_config(path, project_root=Path.cwd())
-        except TournamentImportError as exc:
-            await ctx.respond(str(exc), ephemeral=True)
-            return
-
-        if not imported.validation.valid:
-            embed = discord.Embed(
-                title="Tournament import failed validation",
-                color=discord.Color.red(),
-            )
-            embed.add_field(
-                name="File",
-                value=f"`{imported.path}`",
-                inline=False,
-            )
-            embed.add_field(
-                name="Problems",
-                value=_format_problem_list(imported.validation.errors),
-                inline=False,
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-
-        summary = imported.validation.summary
-        if summary is None:
-            await ctx.respond("Tournament validation did not return a summary.", ephemeral=True)
-            return
-
-        if validate_only:
-            embed = _success_embed(
-                title="Tournament config is valid",
-                path=imported.path,
-                config_hash=imported.config_hash,
-                summary=summary,
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-
-        status = await TournamentConfigRepository(self.bot.database.pool).save_active_import(
-            guild_id=_guild_id(ctx),
-            imported_by_user_id=str(ctx.author.id),
-            summary=summary,
-            config_hash=imported.config_hash,
-            config=dict(imported.config),
-        )
-
-        embed = _success_embed(
-            title="Tournament imported",
-            path=imported.path,
-            config_hash=status.config_hash,
-            summary=summary,
-        )
-        await ctx.respond(embed=embed, ephemeral=True)
-
-    @admin.command(
-        name="sync",
-        description="Show live result sync status or trigger a manual sync.",
-    )
-    async def sync_command(
-        self,
-        ctx: discord.ApplicationContext,
-        run: bool = False,
-    ) -> None:
-        if not await self._ensure_admin(ctx):
-            return
-
-        guild_id = _guild_id(ctx)
-        if not run:
-            latest = await ResultRepository(self.bot.database.pool).latest_sync_run(
-                guild_id=guild_id
-            )
-            if latest is None:
-                await ctx.respond("No result sync has run for this server yet.", ephemeral=True)
-                return
-            embed = discord.Embed(
-                title="Result sync status",
-                color=discord.Color.blurple(),
-            )
-            embed.add_field(name="Provider", value=latest.provider, inline=True)
-            embed.add_field(name="Status", value=latest.status, inline=True)
-            embed.add_field(
-                name="Finished",
-                value=(
-                    f"{latest.finished_at:%Y-%m-%d %H:%M UTC}"
-                    if latest.finished_at
-                    else "Still running"
-                ),
-                inline=True,
-            )
-            embed.add_field(
-                name="Matches",
-                value=(
-                    f"Fetched {latest.fetched_match_count}, "
-                    f"applied {latest.applied_match_count}, "
-                    f"warnings {latest.warning_count}"
-                ),
-                inline=False,
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-
-        await ctx.defer(ephemeral=True)
-        sync_service = ResultSyncService(
-            self.bot.database.pool,
-            provider_name=self.bot.settings.live_results_provider,
-        )
-        try:
-            summary = await sync_service.sync_guild(guild_id=guild_id)
-            recalculation = await LeaderboardService(self.bot.database.pool).recalculate(
-                guild_id=guild_id
-            )
-            await AuditLogRepository(self.bot.database.pool).insert(
-                guild_id=guild_id,
-                actor_user_id=str(ctx.author.id),
-                action="manual_result_sync",
-                details={
-                    "sync_run_id": summary.sync_run.id,
-                    "tournament_config_id": summary.sync_run.tournament_config_id,
-                    "provider": summary.sync_run.provider,
-                    "fetched_match_count": summary.fetched_match_count,
-                    "applied_match_count": summary.applied_match_count,
-                    "skipped_match_count": summary.skipped_match_count,
-                    "scored_prediction_count": recalculation.scored_prediction_count,
-                    "scoring_version": recalculation.scoring_version,
-                },
-            )
-        except (ResultSyncServiceError, LeaderboardServiceError) as exc:
-            await ctx.respond(str(exc), ephemeral=True)
-            return
-
-        await ctx.respond(
-            (
-                "Result sync complete. "
-                f"Fetched {summary.fetched_match_count}, applied {summary.applied_match_count}, "
-                f"skipped {summary.skipped_match_count}. "
-                f"Recalculated {recalculation.scored_prediction_count} submitted prediction(s) "
-                f"with scoring {recalculation.scoring_version}."
-            ),
             ephemeral=True,
         )
 
@@ -744,6 +603,32 @@ def _new_default_settings(
     )
 
 
+async def _ensure_canonical_tournament_config(
+    pool: object,
+    *,
+    guild_id: str,
+    actor_user_id: str,
+) -> object:
+    imported = load_tournament_config(project_root=Path.cwd())
+    if not imported.validation.valid:
+        raise TournamentImportError(
+            "Canonical tournament config failed validation: "
+            f"{_format_problem_list(imported.validation.errors)}"
+        )
+    summary = imported.validation.summary
+    if summary is None:
+        raise TournamentImportError(
+            "Canonical tournament validation did not return a summary."
+        )
+    return await TournamentConfigRepository(pool).save_active_import(
+        guild_id=guild_id,
+        imported_by_user_id=actor_user_id,
+        summary=summary,
+        config_hash=imported.config_hash,
+        config=dict(imported.config),
+    )
+
+
 def _default_scoring_rules() -> dict[str, int]:
     return asdict(ScoringRules())
 
@@ -944,6 +829,7 @@ def _setup_embed(
     settings: GuildSettings,
     title: str,
     live_provider: str,
+    tournament: object | None = None,
 ) -> discord.Embed:
     embed = discord.Embed(title=title, color=discord.Color.green())
     embed.add_field(
@@ -984,6 +870,15 @@ def _setup_embed(
         value=f"`{live_provider}` (operator configured)",
         inline=True,
     )
+    if tournament is not None:
+        embed.add_field(
+            name="Tournament data",
+            value=(
+                f"{tournament.tournament_name}\n"
+                f"`{tournament.tournament_id}` / hash `{tournament.config_hash[:12]}`"
+            ),
+            inline=False,
+        )
     embed.add_field(
         name="Predictions",
         value="Open" if settings.predictions_open else "Closed",
@@ -1022,34 +917,6 @@ def _format_scoring_rules(rules: ScoringRules) -> str:
     )
 
 
-def _success_embed(
-    *,
-    title: str,
-    path: Path,
-    config_hash: str,
-    summary: object,
-) -> discord.Embed:
-    embed = discord.Embed(title=title, color=discord.Color.green())
-    embed.add_field(name="File", value=f"`{path}`", inline=False)
-    embed.add_field(name="Tournament", value=f"{summary.name}\n`{summary.tournament_id}`", inline=False)
-    embed.add_field(
-        name="Imported data",
-        value=(
-            f"{summary.team_count} teams, {summary.group_count} groups, "
-            f"{summary.fixture_count} fixtures, "
-            f"{summary.opening_knockout_matches} Round of 32 matches"
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="Third-place allocation",
-        value=f"{summary.third_place_rule_count} rules from `{summary.source_version}`",
-        inline=False,
-    )
-    embed.add_field(name="Hash", value=f"`{config_hash[:12]}`", inline=True)
-    return embed
-
-
 def _status_embed(
     *,
     settings: object,
@@ -1078,7 +945,7 @@ def _status_embed(
             f"Hash `{tournament.config_hash[:12]}`\n"
             f"Imported {tournament.imported_at:%Y-%m-%d %H:%M UTC}"
             if tournament is not None
-            else "Run `/admin import` with a complete tournament JSON file."
+            else "Run `/admin setup` to attach the canonical 2026 World Cup data."
         ),
         inline=False,
     )

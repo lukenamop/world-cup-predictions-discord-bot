@@ -101,6 +101,7 @@ Environment variables:
 - `BOT_ENV`
 - `LOG_LEVEL`
 - `OWNER_USER_IDS`
+- `OPERATOR_GUILD_ID`
 - `DEFAULT_TIMEZONE`
 - `LIVE_RESULTS_PROVIDER` defaulting to `fifa_public_calendar`
 - Provider-specific credentials only when required
@@ -127,7 +128,7 @@ Only add Discord application values beyond `DISCORD_TOKEN` when implementation a
 - Use a provider adapter for the product-selected live results provider so providers can be replaced or supplemented without changing scoring or command logic.
 - Result sync should cache provider responses, store last successful sync state, respect rate limits, and use retry/backoff.
 - If provider data exceeds the product delay allowance, log a single warning per delayed match or sync window.
-- Treat live result ingestion, recalculation, and admin sync workflows as idempotent.
+- Treat live result ingestion, recalculation, and operator sync workflows as idempotent.
 - Audit log sync runs and admin actions that mutate results, locks, scoring, tournament config, exports, or backups.
 
 ## Visual Implementation

@@ -426,7 +426,12 @@ class _FakePreferencesRepository:
 
 
 class _FakeResultRepository:
-    async def latest_sync_run(self, *, guild_id: str) -> None:
+    async def latest_sync_run(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int | None = None,
+    ) -> None:
         return None
 
 

@@ -137,7 +137,10 @@ class PredictionViewService:
 
         settings = await self.settings.get(guild_id)
         model = TournamentModel.from_config(tournament.config)
-        latest_sync_run = await self.results.latest_sync_run(guild_id=guild_id)
+        latest_sync_run = await self.results.latest_sync_run(
+            guild_id=guild_id,
+            tournament_config_id=tournament.id,
+        )
         lock_deadline = effective_lock_deadline(
             configured_deadline_utc=settings.lock_deadline_utc if settings else None,
             tournament_config=tournament.config,

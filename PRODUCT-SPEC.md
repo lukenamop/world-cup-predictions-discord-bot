@@ -57,7 +57,7 @@ Reference: [FIFA World Cup 2026 tournament format](https://gpcustomersupportfwc2
 Expected setup flow:
 
 1. Admin sets prediction announcement and leaderboard channels.
-2. Admin imports or selects tournament data.
+2. Bot attaches the canonical checked-in 2026 World Cup tournament data.
 3. Admin accepts or adjusts the suggested scoring defaults.
 4. Admin configures lock deadline.
 5. Admin opens predictions.
@@ -67,17 +67,17 @@ prediction-related league notices such as rules, lock notices, reminders,
 open/closed status, and setup/status posts. It is not used for private
 prediction entry; `/predict` and `/edit` remain private user flows. Live results
 provider selection is operator-level for now through `LIVE_RESULTS_PROVIDER`, not
-configurable per Discord server.
+configurable per Discord server. Guild admins cannot import alternate tournament
+JSON during MVP; custom imports are a possible future development.
 
 Setup commands:
 
 - `/admin setup`
-- `/admin import`
 - `/admin config`
-- `/admin sync`
 - `/admin open`
 - `/admin close`
 - `/admin status`
+- `/operator sync` in the configured operator guild only
 
 ### Prediction Entry
 
@@ -107,7 +107,7 @@ Official group and knockout results update automatically from a configured live 
 
 Preferred default provider: FIFA public calendar. It exposes the tournament fixture IDs used by the checked-in config and publishes score, status, and winner fields through the same calendar match feed. Public data is acceptable if observed result delay stays under 6 hours; if a score is delayed longer, log a single warning for that match or sync window to avoid warning floods.
 
-Admins can trigger a manual sync or recalculation, but normal operation should not require manual result entry.
+Operators can trigger a global manual sync from the configured operator guild. Server admins can trigger recalculation from stored results, but normal operation should not require manual result entry.
 
 ### Leaderboards
 
@@ -189,19 +189,23 @@ Public/user commands:
 
 Admin commands:
 
-- `/admin setup`: configures prediction announcement channel, leaderboard channel, timezone, and initial settings.
-- `/admin import`: imports or validates tournament, fixture, bracket, and allocation-table data.
+- `/admin setup`: configures prediction announcement channel, leaderboard channel, timezone, initial settings, and canonical 2026 World Cup tournament data.
 - `/admin config`: views or updates scoring, privacy defaults, lock mode, timezone, and configured channels.
 - `/admin open`: opens prediction entry.
 - `/admin close`: closes prediction entry without changing the configured lock deadline.
 - `/admin lock`: sets, views, or forces prediction locks.
-- `/admin sync`: checks live sync status or triggers manual result sync.
 - `/admin recalc`: recalculates scores and leaderboard totals.
 - `/admin post`: posts leaderboard, lock, reminder, or rules snapshots to configured channels.
 - `/admin export`: exports tournament, prediction, scoring, or leaderboard data.
 - `/admin backup`: creates an operator-friendly backup of bot configuration and database state.
 
 Admin commands require Discord Manage Guild permission by default. Additional users and roles can be granted `/admin` access through Discord Server Settings > Integrations > Command Permissions > Role & Member Overrides.
+
+Operator commands:
+
+- `/operator sync`: fetches live provider data once and applies it globally to all configured guilds.
+
+Operator commands are registered only in `OPERATOR_GUILD_ID`. Invocation requires Discord Administrator permission in that guild or a user ID listed in `OWNER_USER_IDS`.
 
 ## Discord UX
 
@@ -263,7 +267,7 @@ Visual design:
 ### 4. Results And Scoring
 
 - Add live results client and sync job.
-- Add admin sync status and manual sync.
+- Add operator manual sync.
 - Compute official standings and third-place qualifiers.
 - Implement scoring, recalculation, and point breakdowns.
 
@@ -299,8 +303,8 @@ Visual design:
 
 ### 8. Result Sync Production Hardening
 
-- Make scheduled sync use each guild's configured provider and active tournament
-  config instead of only process-level defaults.
+- Make scheduled sync use the operator-configured provider and active canonical
+  tournament config for all configured guilds.
 - Scope latest sync status and prediction image sync metadata to the active
   tournament config.
 - Persist last successful sync state and enough cached provider response metadata

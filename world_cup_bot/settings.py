@@ -23,6 +23,7 @@ class AppSettings:
     bot_env: str
     log_level: str
     owner_user_ids: frozenset[str]
+    operator_guild_id: str | None
     default_timezone: str
     live_results_provider: str
 
@@ -61,6 +62,10 @@ class AppSettings:
             bot_env=_clean(source.get("BOT_ENV")) or "development",
             log_level=log_level,
             owner_user_ids=_parse_owner_ids(source.get("OWNER_USER_IDS", "")),
+            operator_guild_id=_parse_optional_discord_id(
+                source.get("OPERATOR_GUILD_ID"),
+                name="OPERATOR_GUILD_ID",
+            ),
             default_timezone=timezone,
             live_results_provider=(
                 _clean(source.get("LIVE_RESULTS_PROVIDER"))
@@ -114,6 +119,15 @@ def _parse_owner_ids(raw_value: str | None) -> frozenset[str]:
         if value:
             values.append(value)
     return frozenset(values)
+
+
+def _parse_optional_discord_id(raw_value: str | None, *, name: str) -> str | None:
+    value = _clean(raw_value)
+    if value is None:
+        return None
+    if not value.isdigit():
+        raise SettingsError(f"Invalid {name}: expected a Discord snowflake ID")
+    return value
 
 
 def _validate_timezone(timezone: str) -> None:

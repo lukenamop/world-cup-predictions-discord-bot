@@ -18,6 +18,7 @@ class SettingsTests(unittest.TestCase):
                     "postgresql://world_cup_bot:secret@localhost:5432/world_cup_bot"
                 ),
                 "OWNER_USER_IDS": "123, 456,,",
+                "OPERATOR_GUILD_ID": "999",
             }
         )
 
@@ -25,8 +26,19 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.bot_env, "development")
         self.assertEqual(settings.log_level, "INFO")
         self.assertEqual(settings.owner_user_ids, frozenset({"123", "456"}))
+        self.assertEqual(settings.operator_guild_id, "999")
         self.assertEqual(settings.default_timezone, "America/Indiana/Indianapolis")
         self.assertEqual(settings.live_results_provider, "fifa_public_calendar")
+
+    def test_invalid_operator_guild_id_fails_clearly(self) -> None:
+        with self.assertRaisesRegex(SettingsError, "Invalid OPERATOR_GUILD_ID"):
+            AppSettings.from_env(
+                {
+                    "DISCORD_TOKEN": "token",
+                    "DATABASE_URL": "postgresql://world_cup_bot@localhost/world_cup_bot",
+                    "OPERATOR_GUILD_ID": "not-a-snowflake",
+                }
+            )
 
     def test_invalid_timezone_fails_clearly(self) -> None:
         with self.assertRaisesRegex(SettingsError, "Invalid DEFAULT_TIMEZONE"):

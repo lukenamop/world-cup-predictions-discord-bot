@@ -1,6 +1,6 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 7 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images, preferences, guided admin setup/configuration, admin posting, exports, and backups.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 8 work from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, canonical 2026 World Cup tournament configuration, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images, preferences, guided admin setup/configuration, operator sync, admin posting, exports, and backups.
 
 ## Current Command Surface
 
@@ -15,18 +15,17 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/rank [user]` shows a user's current shared rank and point totals after scores have been recalculated.
 - `/points [user]` shows a user's group/knockout point breakdown after scores have been recalculated.
 - `/rules` shows scoring and lock behavior.
-- `/admin setup [announcement_channel] [leaderboard_channel] [timezone_name] [share_full_bracket_default] [lock_deadline_local] [clear_lock_deadline]` configures the server's prediction announcement channel, leaderboard channel, timezone, privacy default, default scoring, and lock deadline.
+- `/admin setup [announcement_channel] [leaderboard_channel] [timezone_name] [share_full_bracket_default] [lock_deadline_local] [clear_lock_deadline]` configures the server's prediction announcement channel, leaderboard channel, timezone, privacy default, default scoring, lock deadline, and canonical 2026 World Cup tournament data.
 - `/admin config [...]` views or updates configured channels, timezone, privacy default, lock deadline, and scoring values after setup.
 - `/admin status` shows setup status for the current server, including active tournament data.
-- `/admin import [path] [validate_only]` validates a tournament JSON file under `config/` and imports it for the current server when valid.
 - `/admin open` opens prediction entry.
 - `/admin close` closes prediction entry without changing the lock deadline.
 - `/admin lock [deadline_utc] [clear]` sets or clears the full-bracket lock deadline. Use ISO-8601 UTC timestamps such as `2026-06-11T18:00:00Z`.
-- `/admin sync [run]` shows the latest live result sync status, or triggers a manual sync when `run:True`.
 - `/admin recalc` recalculates submitted prediction scores from stored results.
 - `/admin post [kind] [channel]` posts `leaderboard`, `rules`, `lock`, or `status` snapshots to configured channels by default, or to an explicit override channel.
 - `/admin export` returns a JSON export of submitted predictions and current scores.
 - `/admin backup` returns an operator-friendly JSON backup of league settings, active tournament config, predictions, scores, stored results, and recent sync runs.
+- `/operator sync` runs one global live-result sync for all configured guilds. It is registered only in `OPERATOR_GUILD_ID` and requires Discord Administrator permission or an ID listed in `OWNER_USER_IDS`.
 
 Admin commands require Discord Manage Server permission by default. Grant role or member overrides through Discord Server Settings > Integrations > Command Permissions.
 
@@ -78,10 +77,11 @@ Optional environment variables:
 - `BOT_ENV`, default `development`
 - `LOG_LEVEL`, default `INFO`
 - `OWNER_USER_IDS`, comma-separated Discord IDs
+- `OPERATOR_GUILD_ID`, Discord guild ID where `/operator` commands are registered
 - `DEFAULT_TIMEZONE`, default `America/Indiana/Indianapolis`
 - `LIVE_RESULTS_PROVIDER`, default `fifa_public_calendar`
 
-`LIVE_RESULTS_PROVIDER` is operator-level configuration. Individual Discord servers cannot select a live provider yet.
+`LIVE_RESULTS_PROVIDER` is operator-level configuration. Individual Discord servers cannot select a live provider. `OPERATOR_GUILD_ID` is optional for normal background sync, but must be set to use `/operator sync`.
 
 ## Running The Bot
 
@@ -142,20 +142,13 @@ Validate a tournament file locally:
 python scripts/validate_tournament.py config/tournaments/2026_world_cup.json
 ```
 
-Admins can validate or import the same file from Discord:
-
-```text
-/admin import path:config/tournaments/2026_world_cup.json validate_only:True
-/admin import path:config/tournaments/2026_world_cup.json validate_only:False
-```
-
-Successful imports are stored in PostgreSQL as immutable config snapshots and marked active for that Discord server. Imports also write an audit log row.
+`/admin setup` attaches the checked-in 2026 World Cup config automatically. Guild admins cannot import alternate tournament JSON files in the MVP. Custom tournament imports are a possible future development.
 
 ## Prediction Entry
 
 Prediction entry is private and submit-based:
 
-- Admins run `/admin setup`, import tournament data, then run `/admin open`.
+- Admins run `/admin setup`, then run `/admin open`.
 - `/predict` walks members through group ranking, predicted advancing third-place teams, and knockout winners.
 - Group ranking is captured one position at a time so ordering is explicit.
 - The Round of 32 is seeded automatically from group predictions, selected third-place qualifiers, and the imported allocation table.
@@ -177,15 +170,15 @@ Champion, runner-up, third-place picks, and available point totals remain visibl
 
 ## Results And Scoring
 
-Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `fifa_public_calendar`. The FIFA provider calls the public calendar matches endpoint for the imported tournament date window and stores any provider matches that map to imported fixture IDs.
+Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `fifa_public_calendar`. The FIFA provider calls the public calendar matches endpoint for the canonical tournament date window and stores any provider matches that map to fixture IDs.
 
 Manual sync:
 
 ```text
-/admin sync run:True
+/operator sync
 ```
 
-The bot also starts a 30-minute background sync loop after startup. Each sync writes `match_results` and `result_sync_runs`, then recalculates scores for submitted predictions.
+The bot also starts a 30-minute background sync loop after startup. Scheduled sync fetches once per provider/config feed, applies results to all configured guilds, writes `match_results` and `result_sync_runs`, caches provider response payloads for debugging, logs delayed-provider warnings once, and recalculates scores for submitted predictions.
 
 Manual recalculation without fetching new provider data:
 

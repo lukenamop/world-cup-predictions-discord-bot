@@ -487,6 +487,11 @@ class ActiveTournamentConfig(TournamentStatus):
     config: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class GuildActiveTournamentConfig(ActiveTournamentConfig):
+    guild_id: str
+
+
 class TournamentConfigRepository:
     def __init__(self, pool: Any) -> None:
         self.pool = pool
@@ -641,6 +646,42 @@ class TournamentConfigRepository:
                 """
             )
         return [row["guild_id"] for row in rows]
+
+    async def list_active_configs(self) -> list[GuildActiveTournamentConfig]:
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select
+                    gts.guild_id,
+                    tc.id,
+                    tc.tournament_id,
+                    tc.tournament_name,
+                    tc.schema_version,
+                    tc.config_hash,
+                    tc.config,
+                    tc.imported_at,
+                    tc.imported_by_user_id
+                from guild_tournament_state gts
+                join tournament_configs tc
+                    on tc.id = gts.active_tournament_config_id
+                order by gts.guild_id
+                """
+            )
+
+        return [
+            GuildActiveTournamentConfig(
+                id=row["id"],
+                guild_id=row["guild_id"],
+                tournament_id=row["tournament_id"],
+                tournament_name=row["tournament_name"],
+                schema_version=row["schema_version"],
+                config_hash=row["config_hash"],
+                config=_json_dict(row["config"]),
+                imported_at=row["imported_at"],
+                imported_by_user_id=row["imported_by_user_id"],
+            )
+            for row in rows
+        ]
 
 
 def _row_to_tournament_status(row: Any) -> TournamentStatus:
@@ -931,6 +972,88 @@ class ResultRepository:
     def __init__(self, pool: Any) -> None:
         self.pool = pool
 
+    async def save_provider_response_cache(
+        self,
+        *,
+        provider: str,
+        tournament_id: str,
+        config_hash: str,
+        fetched_match_count: int,
+        request_metadata: dict[str, Any],
+        response_payload: dict[str, Any],
+    ) -> int:
+        async with self.pool.acquire() as connection:
+            return await connection.fetchval(
+                """
+                insert into provider_response_cache (
+                    provider,
+                    tournament_id,
+                    config_hash,
+                    fetched_match_count,
+                    request_metadata,
+                    response_payload
+                )
+                values ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
+                returning id
+                """,
+                provider,
+                tournament_id,
+                config_hash,
+                fetched_match_count,
+                json.dumps(request_metadata, sort_keys=True),
+                json.dumps(response_payload, sort_keys=True),
+            )
+
+    async def record_delay_warning_once(
+        self,
+        *,
+        provider: str,
+        config_hash: str,
+        provider_match_id: str,
+        details: dict[str, Any],
+    ) -> bool:
+        async with self.pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                insert into result_sync_warnings (
+                    provider,
+                    config_hash,
+                    provider_match_id,
+                    warning_type,
+                    details
+                )
+                values ($1, $2, $3, 'provider_result_delay', $4::jsonb)
+                on conflict (
+                    provider,
+                    config_hash,
+                    provider_match_id,
+                    warning_type
+                ) do nothing
+                returning id
+                """,
+                provider,
+                config_hash,
+                provider_match_id,
+                json.dumps(details, sort_keys=True),
+            )
+            if row is not None:
+                return True
+            await connection.execute(
+                """
+                update result_sync_warnings set
+                    last_seen_at = now()
+                where provider = $1
+                    and config_hash = $2
+                    and provider_match_id = $3
+                    and warning_type = 'provider_result_delay'
+                """,
+                provider,
+                config_hash,
+                provider_match_id,
+            )
+
+        return False
+
     async def list_match_results(
         self,
         *,
@@ -1107,8 +1230,37 @@ class ResultRepository:
 
         return _row_to_sync_run(row)
 
-    async def latest_sync_run(self, *, guild_id: str) -> ResultSyncRun | None:
+    async def latest_sync_run(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int | None = None,
+    ) -> ResultSyncRun | None:
         async with self.pool.acquire() as connection:
+            if tournament_config_id is None:
+                row = await connection.fetchrow(
+                    """
+                    select
+                        id,
+                        guild_id,
+                        tournament_config_id,
+                        provider,
+                        status,
+                        fetched_match_count,
+                        applied_match_count,
+                        warning_count,
+                        details,
+                        started_at,
+                        finished_at
+                    from result_sync_runs
+                    where guild_id = $1
+                    order by started_at desc
+                    limit 1
+                    """,
+                    guild_id,
+                )
+                return _row_to_sync_run(row) if row else None
+
             row = await connection.fetchrow(
                 """
                 select
@@ -1125,10 +1277,12 @@ class ResultRepository:
                     finished_at
                 from result_sync_runs
                 where guild_id = $1
+                    and tournament_config_id = $2
                 order by started_at desc
                 limit 1
                 """,
                 guild_id,
+                tournament_config_id,
             )
 
         return _row_to_sync_run(row) if row else None
