@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import discord
@@ -69,6 +70,15 @@ class AdminCog(commands.Cog):
             inline=True,
         )
         embed.add_field(
+            name="Lock deadline",
+            value=(
+                f"{settings.lock_deadline_utc:%Y-%m-%d %H:%M UTC}"
+                if settings and settings.lock_deadline_utc
+                else "First tournament kickoff"
+            ),
+            inline=True,
+        )
+        embed.add_field(
             name="Timezone",
             value=settings.timezone if settings else self.bot.settings.default_timezone,
             inline=True,
@@ -89,6 +99,99 @@ class AdminCog(commands.Cog):
         )
 
         await ctx.respond(embed=embed, ephemeral=True)
+
+    @admin.command(name="open", description="Open prediction entry for this server.")
+    async def open_command(self, ctx: discord.ApplicationContext) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        guild_id = _guild_id(ctx)
+        settings = await GuildSettingsRepository(
+            self.bot.database.pool
+        ).set_predictions_open_with_audit(
+            guild_id=guild_id,
+            timezone=self.bot.settings.default_timezone,
+            live_results_provider=self.bot.settings.live_results_provider,
+            predictions_open=True,
+            actor_user_id=str(ctx.author.id),
+            action="predictions_opened",
+            details={"predictions_open": True},
+        )
+        await ctx.respond(
+            (
+                "Prediction entry is open. "
+                f"Lock deadline: {_format_lock_deadline(settings.lock_deadline_utc)}."
+            ),
+            ephemeral=True,
+        )
+
+    @admin.command(name="close", description="Close prediction entry without changing the lock.")
+    async def close_command(self, ctx: discord.ApplicationContext) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        guild_id = _guild_id(ctx)
+        await GuildSettingsRepository(
+            self.bot.database.pool
+        ).set_predictions_open_with_audit(
+            guild_id=guild_id,
+            timezone=self.bot.settings.default_timezone,
+            live_results_provider=self.bot.settings.live_results_provider,
+            predictions_open=False,
+            actor_user_id=str(ctx.author.id),
+            action="predictions_closed",
+            details={"predictions_open": False},
+        )
+        await ctx.respond("Prediction entry is closed.", ephemeral=True)
+
+    @admin.command(
+        name="lock",
+        description="Set or clear the UTC full-bracket lock deadline.",
+    )
+    async def lock_command(
+        self,
+        ctx: discord.ApplicationContext,
+        deadline_utc: str | None = None,
+        clear: bool = False,
+    ) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        if clear:
+            parsed_deadline = None
+        else:
+            if not deadline_utc:
+                await ctx.respond(
+                    "Pass `deadline_utc` as an ISO-8601 UTC timestamp, or set `clear:True`.",
+                    ephemeral=True,
+                )
+                return
+            try:
+                parsed_deadline = _parse_utc_datetime(deadline_utc)
+            except ValueError as exc:
+                await ctx.respond(str(exc), ephemeral=True)
+                return
+
+        guild_id = _guild_id(ctx)
+        settings = await GuildSettingsRepository(
+            self.bot.database.pool
+        ).set_lock_deadline_with_audit(
+            guild_id=guild_id,
+            timezone=self.bot.settings.default_timezone,
+            live_results_provider=self.bot.settings.live_results_provider,
+            lock_deadline_utc=parsed_deadline,
+            actor_user_id=str(ctx.author.id),
+            action="prediction_lock_updated",
+            details={
+                "lock_deadline_utc": (
+                    parsed_deadline.isoformat() if parsed_deadline else None
+                )
+            },
+        )
+        await ctx.respond(
+            f"Prediction lock deadline: {_format_lock_deadline(settings.lock_deadline_utc)}.",
+            ephemeral=True,
+        )
 
     @admin.command(
         name="import",
@@ -209,6 +312,27 @@ def _format_problem_list(problems: tuple[str, ...]) -> str:
         lines.append(f"- ... and {len(problems) - len(visible)} more")
     output = "\n".join(lines)
     return output[:1024]
+
+
+def _parse_utc_datetime(value: str) -> datetime:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized.removesuffix("Z") + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError("deadline_utc must be an ISO-8601 timestamp.") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("deadline_utc must include a UTC offset.")
+    if parsed.utcoffset().total_seconds() != 0:
+        raise ValueError("deadline_utc must be a UTC timestamp.")
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_lock_deadline(deadline: datetime | None) -> str:
+    if deadline is None:
+        return "first tournament kickoff"
+    return f"{deadline:%Y-%m-%d %H:%M UTC}"
 
 
 def setup(bot: discord.Bot) -> None:

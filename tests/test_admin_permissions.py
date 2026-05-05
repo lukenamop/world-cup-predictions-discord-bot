@@ -4,6 +4,7 @@ import importlib
 import sys
 import types
 import unittest
+from datetime import datetime, timezone
 
 
 class AdminPermissionTests(unittest.IsolatedAsyncioTestCase):
@@ -36,6 +37,21 @@ class AdminPermissionTests(unittest.IsolatedAsyncioTestCase):
             ctx.responses,
             [("Admin commands can only be used in a server.", True)],
         )
+
+
+class AdminLockDeadlineParsingTests(unittest.TestCase):
+    def test_parse_utc_datetime_accepts_zulu_utc(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+
+        parsed = admin_module._parse_utc_datetime("2026-06-11T18:00:00Z")
+
+        self.assertEqual(parsed, datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc))
+
+    def test_parse_utc_datetime_rejects_non_utc_offset(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+
+        with self.assertRaisesRegex(ValueError, "UTC timestamp"):
+            admin_module._parse_utc_datetime("2026-06-11T18:00:00-04:00")
 
 
 class _FakeContext:

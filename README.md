@@ -1,16 +1,21 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 2 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, admin setup status, migrations, and basic bot health visibility.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 3 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, admin setup status, and private prediction draft/submission flows.
 
 ## Current Command Surface
 
-- `/help` confirms the bot is online and points users to the upcoming prediction flow.
+- `/help` confirms the bot is online and lists the current prediction commands.
+- `/predict` starts or resumes a private guided prediction draft.
+- `/edit` starts a private replacement draft for an already submitted prediction before lock. The last submitted bracket remains stored until the replacement draft is submitted.
 - `/admin status` shows setup status for the current server, including active tournament data.
 - `/admin import [path] [validate_only]` validates a tournament JSON file under `config/` and imports it for the current server when valid.
+- `/admin open` opens prediction entry.
+- `/admin close` closes prediction entry without changing the lock deadline.
+- `/admin lock [deadline_utc] [clear]` sets or clears the full-bracket lock deadline. Use ISO-8601 UTC timestamps such as `2026-06-11T18:00:00Z`.
 
 Admin commands require Discord Manage Server permission by default. Grant role or member overrides through Discord Server Settings > Integrations > Command Permissions.
 
-Prediction entry, scoring, leaderboards, generated visuals, and richer admin workflows are intentionally left for later milestones.
+Scoring, leaderboards, generated visuals, and richer admin workflows are intentionally left for later milestones.
 
 ## Ubuntu PostgreSQL Setup
 
@@ -127,6 +132,20 @@ Admins can validate or import the same file from Discord:
 ```
 
 Successful imports are stored in PostgreSQL as immutable config snapshots and marked active for that Discord server. Imports also write an audit log row.
+
+## Prediction Entry
+
+Prediction entry is private and draft-based:
+
+- Admins import tournament data, then run `/admin open`.
+- `/predict` walks members through group ranking, predicted advancing third-place teams, and knockout winners.
+- Group ranking is captured one position at a time so ordering is explicit.
+- The Round of 32 is seeded automatically from group predictions, selected third-place qualifiers, and the imported allocation table.
+- Drafts save after each step and can also be saved manually.
+- `/edit` starts a replacement draft before lock. Existing submitted data is not replaced until the new draft is complete and submitted.
+- Predictions lock at `/admin lock deadline_utc:...` when configured; otherwise the first imported fixture kickoff is used as the effective lock.
+
+Prediction storage uses `prediction_entries` for the latest draft/submission and `prediction_history` for revision history.
 
 ## PM2
 

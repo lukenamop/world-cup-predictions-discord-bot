@@ -13,17 +13,22 @@ class FoundationCog(commands.Cog):
         embed = discord.Embed(
             title="World Cup predictions",
             description=(
-                "The bot foundation is online. Admins can validate/import "
-                "tournament data now; prediction entry, leaderboards, and scoring "
-                "arrive in the next milestones."
+                "The bot is online. Admins can import tournament data and open "
+                "prediction entry; members can build private drafts and submit "
+                "full brackets before lock."
             ),
             color=discord.Color.blurple(),
         )
-        embed.add_field(name="Status", value="Tournament data ready", inline=True)
+        embed.add_field(name="Status", value="Prediction entry ready", inline=True)
         embed.add_field(
             name="Privacy",
-            value="Prediction flows will be private.",
+            value="Prediction flows are private.",
             inline=True,
+        )
+        embed.add_field(
+            name="Commands",
+            value="`/predict`, `/edit`, `/admin status`, `/admin import`, `/admin open`, `/admin close`, `/admin lock`",
+            inline=False,
         )
         await ctx.respond(embed=embed, ephemeral=True)
 
