@@ -56,12 +56,18 @@ Reference: [FIFA World Cup 2026 tournament format](https://gpcustomersupportfwc2
 
 Expected setup flow:
 
-1. Admin sets prediction and leaderboard channels.
+1. Admin sets prediction announcement and leaderboard channels.
 2. Admin imports or selects tournament data.
 3. Admin accepts or adjusts the suggested scoring defaults.
-4. Admin configures the live results source.
-5. Admin configures lock deadline.
-6. Admin opens predictions.
+4. Admin configures lock deadline.
+5. Admin opens predictions.
+
+The prediction announcement channel is the default public destination for
+prediction-related league notices such as rules, lock notices, reminders,
+open/closed status, and setup/status posts. It is not used for private
+prediction entry; `/predict` and `/edit` remain private user flows. Live results
+provider selection is operator-level for now through `LIVE_RESULTS_PROVIDER`, not
+configurable per Discord server.
 
 Setup commands:
 
@@ -183,9 +189,9 @@ Public/user commands:
 
 Admin commands:
 
-- `/admin setup`: configures channels, timezone, and initial settings.
+- `/admin setup`: configures prediction announcement channel, leaderboard channel, timezone, and initial settings.
 - `/admin import`: imports or validates tournament, fixture, bracket, and allocation-table data.
-- `/admin config`: views or updates scoring, privacy defaults, lock mode, live provider, and guild settings.
+- `/admin config`: views or updates scoring, privacy defaults, lock mode, timezone, and configured channels.
 - `/admin open`: opens prediction entry.
 - `/admin close`: closes prediction entry without changing the configured lock deadline.
 - `/admin lock`: sets, views, or forces prediction locks.
@@ -282,13 +288,13 @@ Visual design:
 
 ### 7. Admin Setup And Guild Configuration
 
-- Add `/admin setup` for prediction channel, leaderboard channel, timezone,
-  initial privacy defaults, scoring defaults, live provider, and lock deadline.
+- Add `/admin setup` for prediction announcement channel, leaderboard channel,
+  timezone, initial privacy defaults, scoring defaults, and lock deadline.
 - Add `/admin config` to view and update scoring rules, privacy defaults, lock
-  mode, live provider, timezone, and configured channels after setup.
+  mode, timezone, and configured channels after setup.
 - Make `/admin post` use configured channels by default while still allowing an
   explicit channel override.
-- Audit every admin change that mutates setup, scoring, privacy, provider, lock,
+- Audit every admin change that mutates setup, scoring, privacy, lock,
   channel, tournament, result, export, or backup state.
 
 ### 8. Result Sync Production Hardening

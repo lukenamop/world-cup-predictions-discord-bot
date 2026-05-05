@@ -15,7 +15,11 @@ class GuildSettings:
     live_results_provider: str
     lock_deadline_utc: datetime | None
     predictions_open: bool
+    announcement_channel_id: str | None = None
+    leaderboard_channel_id: str | None = None
     scoring_rules: dict[str, Any] = field(default_factory=dict)
+    privacy_defaults: dict[str, Any] = field(default_factory=dict)
+    lock_mode: str = "full_bracket_lock"
 
 
 @dataclass(frozen=True)
@@ -36,11 +40,15 @@ class GuildSettingsRepository:
                 """
                 select
                     guild_id,
+                    announcement_channel_id,
+                    leaderboard_channel_id,
                     timezone,
                     live_results_provider,
                     lock_deadline_utc,
                     predictions_open,
-                    scoring_rules
+                    scoring_rules,
+                    privacy_defaults,
+                    lock_mode
                 from guild_settings
                 where guild_id = $1
                 """,
@@ -52,12 +60,87 @@ class GuildSettingsRepository:
 
         return GuildSettings(
             guild_id=row["guild_id"],
+            announcement_channel_id=row["announcement_channel_id"],
+            leaderboard_channel_id=row["leaderboard_channel_id"],
             timezone=row["timezone"],
             live_results_provider=row["live_results_provider"],
             lock_deadline_utc=row["lock_deadline_utc"],
             predictions_open=row["predictions_open"],
             scoring_rules=_json_dict(row["scoring_rules"]),
+            privacy_defaults=_json_dict(row["privacy_defaults"]),
+            lock_mode=row["lock_mode"],
         )
+
+    async def save_settings_with_audit(
+        self,
+        *,
+        settings: GuildSettings,
+        actor_user_id: str,
+        action: str,
+        details: dict[str, object],
+    ) -> GuildSettings:
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    insert into guild_settings (
+                        guild_id,
+                        announcement_channel_id,
+                        leaderboard_channel_id,
+                        timezone,
+                        scoring_rules,
+                        privacy_defaults,
+                        live_results_provider,
+                        lock_mode,
+                        lock_deadline_utc,
+                        predictions_open
+                    )
+                    values (
+                        $1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10
+                    )
+                    on conflict (guild_id) do update set
+                        announcement_channel_id = excluded.announcement_channel_id,
+                        leaderboard_channel_id = excluded.leaderboard_channel_id,
+                        timezone = excluded.timezone,
+                        scoring_rules = excluded.scoring_rules,
+                        privacy_defaults = excluded.privacy_defaults,
+                        live_results_provider = excluded.live_results_provider,
+                        lock_mode = excluded.lock_mode,
+                        lock_deadline_utc = excluded.lock_deadline_utc,
+                        predictions_open = excluded.predictions_open,
+                        updated_at = now()
+                    returning
+                        guild_id,
+                        announcement_channel_id,
+                        leaderboard_channel_id,
+                        timezone,
+                        live_results_provider,
+                        lock_deadline_utc,
+                        predictions_open,
+                        scoring_rules,
+                        privacy_defaults,
+                        lock_mode
+                    """,
+                    settings.guild_id,
+                    settings.announcement_channel_id,
+                    settings.leaderboard_channel_id,
+                    settings.timezone,
+                    json.dumps(settings.scoring_rules, sort_keys=True),
+                    json.dumps(settings.privacy_defaults, sort_keys=True),
+                    settings.live_results_provider,
+                    settings.lock_mode,
+                    settings.lock_deadline_utc,
+                    settings.predictions_open,
+                )
+                await _insert_audit_log(
+                    connection,
+                    guild_id=settings.guild_id,
+                    actor_user_id=actor_user_id,
+                    action=action,
+                    details=details,
+                )
+
+        return _row_to_guild_settings(row)
 
     async def set_predictions_open(
         self,
@@ -131,11 +214,15 @@ class GuildSettingsRepository:
                 updated_at = now()
             returning
                 guild_id,
+                announcement_channel_id,
+                leaderboard_channel_id,
                 timezone,
                 live_results_provider,
                 lock_deadline_utc,
                 predictions_open,
-                scoring_rules
+                scoring_rules,
+                privacy_defaults,
+                lock_mode
             """,
             guild_id,
             timezone,
@@ -215,11 +302,15 @@ class GuildSettingsRepository:
                 updated_at = now()
             returning
                 guild_id,
+                announcement_channel_id,
+                leaderboard_channel_id,
                 timezone,
                 live_results_provider,
                 lock_deadline_utc,
                 predictions_open,
-                scoring_rules
+                scoring_rules,
+                privacy_defaults,
+                lock_mode
             """,
             guild_id,
             timezone,
@@ -321,11 +412,15 @@ def _row_to_user_preferences(row: Any) -> UserPreferences:
 def _row_to_guild_settings(row: Any) -> GuildSettings:
     return GuildSettings(
         guild_id=row["guild_id"],
+        announcement_channel_id=row["announcement_channel_id"],
+        leaderboard_channel_id=row["leaderboard_channel_id"],
         timezone=row["timezone"],
         live_results_provider=row["live_results_provider"],
         lock_deadline_utc=row["lock_deadline_utc"],
         predictions_open=row["predictions_open"],
         scoring_rules=_json_dict(row["scoring_rules"]),
+        privacy_defaults=_json_dict(row["privacy_defaults"]),
+        lock_mode=row["lock_mode"],
     )
 
 

@@ -151,6 +151,10 @@ class PredictionViewService:
             guild_id=guild_id,
             user_id=target_user_id,
         )
+        preferences = _preferences_with_guild_default(
+            preferences=preferences,
+            settings=settings,
+        )
         return PredictionSnapshot(
             guild_id=guild_id,
             viewer_user_id=viewer_user_id,
@@ -199,6 +203,23 @@ class PredictionViewService:
             user_id=user_id,
             share_full_bracket=share_full_bracket,
         )
+
+
+def _preferences_with_guild_default(
+    *,
+    preferences: UserPreferences,
+    settings: GuildSettings | None,
+) -> UserPreferences:
+    if preferences.updated_at is not None or settings is None:
+        return preferences
+    return UserPreferences(
+        guild_id=preferences.guild_id,
+        user_id=preferences.user_id,
+        share_full_bracket=bool(
+            settings.privacy_defaults.get("share_full_bracket", False)
+        ),
+        updated_at=None,
+    )
 
 
 def public_prediction_lines(snapshot: PredictionSnapshot) -> tuple[str, ...]:

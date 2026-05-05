@@ -1,6 +1,6 @@
 create table if not exists guild_settings (
     guild_id text primary key,
-    prediction_channel_id text,
+    announcement_channel_id text,
     leaderboard_channel_id text,
     timezone text not null default 'America/Indiana/Indianapolis',
     scoring_rules jsonb not null default '{}'::jsonb,

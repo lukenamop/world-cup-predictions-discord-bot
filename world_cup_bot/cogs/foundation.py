@@ -33,8 +33,8 @@ class FoundationCog(commands.Cog):
             value=(
                 "`/predict`, `/edit`, `/prediction`, `/groups`, `/bracket`, "
                 "`/preferences`, `/leaderboard`, `/rank`, `/points`, `/rules`, "
-                "`/admin status`, `/admin import`, `/admin open`, `/admin close`, "
-                "`/admin lock`, `/admin sync`, `/admin recalc`, `/admin post`, "
+                "`/admin setup`, `/admin config`, `/admin status`, `/admin import`, "
+                "`/admin open`, `/admin close`, `/admin lock`, `/admin sync`, `/admin recalc`, `/admin post`, "
                 "`/admin export`, `/admin backup`"
             ),
             inline=False,

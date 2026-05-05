@@ -4,7 +4,13 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import unittest
 
-from world_cup_bot.data.repositories import PredictionEntry, PredictionScore, UserPreferences
+from world_cup_bot.data.repositories import (
+    ActiveTournamentConfig,
+    GuildSettings,
+    PredictionEntry,
+    PredictionScore,
+    UserPreferences,
+)
 from world_cup_bot.domain.predictions import (
     TournamentModel,
     empty_prediction_data,
@@ -16,6 +22,7 @@ from world_cup_bot.domain.predictions import (
 from world_cup_bot.services.leaderboard_service import RankedScore, leaderboard_row_text
 from world_cup_bot.services.prediction_view_service import (
     PredictionSnapshot,
+    PredictionViewService,
     bracket_render_model,
     group_sheet_render_model,
 )
@@ -28,7 +35,7 @@ else:
     PIL_AVAILABLE = True
 
 
-class MilestoneFiveViewTests(unittest.TestCase):
+class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
     def test_privacy_allows_owner_or_shared_full_prediction_views(self) -> None:
         owner_snapshot = _snapshot(viewer_user_id="user-1", share_full_bracket=False)
         other_private = _snapshot(viewer_user_id="user-2", share_full_bracket=False)
@@ -112,6 +119,36 @@ class MilestoneFiveViewTests(unittest.TestCase):
 
         self.assertIn("Champion: Team A1", row)
 
+    async def test_snapshot_uses_guild_privacy_default_for_missing_preference(self) -> None:
+        service = _view_service_with_privacy_default(
+            default_share_full_bracket=True,
+            preference_share_full_bracket=False,
+            preference_updated_at=None,
+        )
+
+        snapshot = await service.snapshot(
+            guild_id="guild-1",
+            target_user_id="user-1",
+            viewer_user_id="user-2",
+        )
+
+        self.assertTrue(snapshot.can_view_full_prediction)
+
+    async def test_snapshot_keeps_explicit_preference_over_guild_default(self) -> None:
+        service = _view_service_with_privacy_default(
+            default_share_full_bracket=True,
+            preference_share_full_bracket=False,
+            preference_updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+
+        snapshot = await service.snapshot(
+            guild_id="guild-1",
+            target_user_id="user-1",
+            viewer_user_id="user-2",
+        )
+
+        self.assertFalse(snapshot.can_view_full_prediction)
+
 
 def _snapshot(
     *,
@@ -171,6 +208,66 @@ def _score() -> PredictionScore:
         scoring_version="test",
         recalculated_at=recalculated_at,
     )
+
+
+def _view_service_with_privacy_default(
+    *,
+    default_share_full_bracket: bool,
+    preference_share_full_bracket: bool,
+    preference_updated_at: datetime | None,
+) -> PredictionViewService:
+    model = TournamentModel.from_config(_prediction_config())
+    data = _complete_home_winner_prediction(model)
+    submitted_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    service = PredictionViewService(pool=None)
+    service.tournaments = _FakeTournamentRepository(
+        ActiveTournamentConfig(
+            id=1,
+            tournament_id="test",
+            tournament_name="Test Cup",
+            schema_version="test",
+            config_hash="hash",
+            config=_prediction_config(),
+            imported_at=submitted_at,
+            imported_by_user_id="admin-1",
+        )
+    )
+    service.predictions = _FakePredictionRepository(
+        PredictionEntry(
+            id=1,
+            guild_id="guild-1",
+            tournament_config_id=1,
+            user_id="user-1",
+            display_name="User One",
+            draft_data=data,
+            submitted_data=data,
+            revision=1,
+            draft_updated_at=submitted_at,
+            submitted_at=submitted_at,
+            submitted_updated_at=submitted_at,
+        )
+    )
+    service.settings = _FakeSettingsRepository(
+        GuildSettings(
+            guild_id="guild-1",
+            timezone="UTC",
+            live_results_provider="fifa_public_calendar",
+            lock_deadline_utc=None,
+            predictions_open=True,
+            privacy_defaults={"share_full_bracket": default_share_full_bracket},
+        )
+    )
+    service.preferences = _FakePreferencesRepository(
+        UserPreferences(
+            guild_id="guild-1",
+            user_id="user-1",
+            share_full_bracket=preference_share_full_bracket,
+            updated_at=preference_updated_at,
+        )
+    )
+    service.results = _FakeResultRepository()
+    service.scores = _FakeScoreRepository()
+    return service
 
 
 def _complete_home_winner_prediction(model: TournamentModel) -> dict[str, object]:
@@ -288,3 +385,57 @@ def _prediction_config() -> dict[str, object]:
             ]
         },
     }
+
+
+class _FakeTournamentRepository:
+    def __init__(self, tournament: ActiveTournamentConfig) -> None:
+        self.tournament = tournament
+
+    async def get_active_config(self, guild_id: str) -> ActiveTournamentConfig:
+        return self.tournament
+
+
+class _FakePredictionRepository:
+    def __init__(self, entry: PredictionEntry) -> None:
+        self.entry = entry
+
+    async def get_entry(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+        user_id: str,
+    ) -> PredictionEntry:
+        return self.entry
+
+
+class _FakeSettingsRepository:
+    def __init__(self, settings: GuildSettings) -> None:
+        self.settings = settings
+
+    async def get(self, guild_id: str) -> GuildSettings:
+        return self.settings
+
+
+class _FakePreferencesRepository:
+    def __init__(self, preferences: UserPreferences) -> None:
+        self.preferences = preferences
+
+    async def get(self, *, guild_id: str, user_id: str) -> UserPreferences:
+        return self.preferences
+
+
+class _FakeResultRepository:
+    async def latest_sync_run(self, *, guild_id: str) -> None:
+        return None
+
+
+class _FakeScoreRepository:
+    async def get_user_score(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+        user_id: str,
+    ) -> None:
+        return None

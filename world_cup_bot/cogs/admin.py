@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
 from discord.ext import commands
@@ -30,6 +32,10 @@ from world_cup_bot.services.tournament_import import (
 )
 
 
+DEFAULT_PRIVACY_DEFAULTS = {"share_full_bracket": False}
+LOCK_MODE = "full_bracket_lock"
+
+
 class AdminCog(commands.Cog):
     admin = discord.SlashCommandGroup(
         "admin",
@@ -39,6 +45,228 @@ class AdminCog(commands.Cog):
 
     def __init__(self, bot: discord.Bot) -> None:
         self.bot = bot
+
+    @admin.command(
+        name="setup",
+        description="Configure this server's league channels, timezone, privacy, scoring, and lock.",
+    )
+    async def setup_command(
+        self,
+        ctx: discord.ApplicationContext,
+        announcement_channel: discord.TextChannel | None = None,
+        leaderboard_channel: discord.TextChannel | None = None,
+        timezone_name: str | None = None,
+        share_full_bracket_default: bool | None = None,
+        lock_deadline_local: str | None = None,
+        clear_lock_deadline: bool = False,
+    ) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        guild_id = _guild_id(ctx)
+        existing = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
+        try:
+            configured_timezone = _validate_timezone_name(
+                timezone_name or (existing.timezone if existing else self.bot.settings.default_timezone)
+            )
+            lock_deadline_utc = _resolve_lock_deadline(
+                existing=existing,
+                timezone_name=configured_timezone,
+                lock_deadline_local=lock_deadline_local,
+                clear_lock_deadline=clear_lock_deadline,
+            )
+        except ValueError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        default_channel = ctx.channel if _is_text_channel(ctx.channel) else None
+        settings = GuildSettings(
+            guild_id=guild_id,
+            announcement_channel_id=_channel_id(
+                announcement_channel
+                or _existing_channel(existing, "announcement_channel_id")
+                or default_channel
+            ),
+            leaderboard_channel_id=_channel_id(
+                leaderboard_channel
+                or _existing_channel(existing, "leaderboard_channel_id")
+                or default_channel
+            ),
+            timezone=configured_timezone,
+            live_results_provider=self.bot.settings.live_results_provider,
+            lock_deadline_utc=lock_deadline_utc,
+            predictions_open=existing.predictions_open if existing else False,
+            scoring_rules=existing.scoring_rules if existing and existing.scoring_rules else _default_scoring_rules(),
+            privacy_defaults={
+                "share_full_bracket": (
+                    bool(share_full_bracket_default)
+                    if share_full_bracket_default is not None
+                    else (
+                        _share_full_bracket_default(existing.privacy_defaults)
+                        if existing
+                        else False
+                    )
+                )
+            },
+            lock_mode=LOCK_MODE,
+        )
+        saved = await GuildSettingsRepository(
+            self.bot.database.pool
+        ).save_settings_with_audit(
+            settings=settings,
+            actor_user_id=str(ctx.author.id),
+            action="guild_setup_updated",
+            details=_settings_audit_details(saved_settings=settings, existing=existing),
+        )
+
+        await ctx.respond(
+            embed=_setup_embed(
+                settings=saved,
+                title="Prediction league setup saved",
+                live_provider=self.bot.settings.live_results_provider,
+            ),
+            ephemeral=True,
+        )
+
+    @admin.command(
+        name="config",
+        description="View or update this server's league configuration.",
+    )
+    async def config_command(
+        self,
+        ctx: discord.ApplicationContext,
+        announcement_channel: discord.TextChannel | None = None,
+        leaderboard_channel: discord.TextChannel | None = None,
+        timezone_name: str | None = None,
+        share_full_bracket_default: bool | None = None,
+        lock_deadline_local: str | None = None,
+        clear_lock_deadline: bool = False,
+        use_default_scoring: bool = False,
+        group_winner: int | None = None,
+        group_runner_up: int | None = None,
+        group_third_place_qualifier: int | None = None,
+        round_of_32_advancement: int | None = None,
+        round_of_16_advancement: int | None = None,
+        quarter_final_advancement: int | None = None,
+        semi_final_advancement: int | None = None,
+        final_advancement: int | None = None,
+        third_place_winner: int | None = None,
+        champion: int | None = None,
+        runner_up: int | None = None,
+    ) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        guild_id = _guild_id(ctx)
+        existing = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
+        scoring_values = _scoring_option_values(
+            group_winner=group_winner,
+            group_runner_up=group_runner_up,
+            group_third_place_qualifier=group_third_place_qualifier,
+            round_of_32_advancement=round_of_32_advancement,
+            round_of_16_advancement=round_of_16_advancement,
+            quarter_final_advancement=quarter_final_advancement,
+            semi_final_advancement=semi_final_advancement,
+            final_advancement=final_advancement,
+            third_place_winner=third_place_winner,
+            champion=champion,
+            runner_up=runner_up,
+        )
+        has_updates = _config_has_updates(
+            announcement_channel=announcement_channel,
+            leaderboard_channel=leaderboard_channel,
+            timezone_name=timezone_name,
+            share_full_bracket_default=share_full_bracket_default,
+            lock_deadline_local=lock_deadline_local,
+            clear_lock_deadline=clear_lock_deadline,
+            use_default_scoring=use_default_scoring,
+            scoring_values=scoring_values,
+        )
+        if existing is None and not has_updates:
+            await ctx.respond(
+                "No setup exists yet. Run `/admin setup` to configure this server.",
+                ephemeral=True,
+            )
+            return
+
+        if existing is not None and not has_updates:
+            await ctx.respond(
+                embed=_setup_embed(
+                    settings=existing,
+                    title="Prediction league configuration",
+                    live_provider=self.bot.settings.live_results_provider,
+                ),
+                ephemeral=True,
+            )
+            return
+
+        baseline = existing or _new_default_settings(
+            guild_id=guild_id,
+            default_timezone=self.bot.settings.default_timezone,
+            live_provider=self.bot.settings.live_results_provider,
+        )
+        try:
+            configured_timezone = _validate_timezone_name(timezone_name or baseline.timezone)
+            lock_deadline_utc = _resolve_lock_deadline(
+                existing=baseline,
+                timezone_name=configured_timezone,
+                lock_deadline_local=lock_deadline_local,
+                clear_lock_deadline=clear_lock_deadline,
+            )
+            scoring_rules = _updated_scoring_rules(
+                baseline=baseline.scoring_rules,
+                use_default_scoring=use_default_scoring,
+                group_winner=group_winner,
+                group_runner_up=group_runner_up,
+                group_third_place_qualifier=group_third_place_qualifier,
+                round_of_32_advancement=round_of_32_advancement,
+                round_of_16_advancement=round_of_16_advancement,
+                quarter_final_advancement=quarter_final_advancement,
+                semi_final_advancement=semi_final_advancement,
+                final_advancement=final_advancement,
+                third_place_winner=third_place_winner,
+                champion=champion,
+                runner_up=runner_up,
+            )
+        except ValueError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        settings = GuildSettings(
+            guild_id=guild_id,
+            announcement_channel_id=_channel_id(announcement_channel) or baseline.announcement_channel_id,
+            leaderboard_channel_id=_channel_id(leaderboard_channel) or baseline.leaderboard_channel_id,
+            timezone=configured_timezone,
+            live_results_provider=self.bot.settings.live_results_provider,
+            lock_deadline_utc=lock_deadline_utc,
+            predictions_open=baseline.predictions_open,
+            scoring_rules=scoring_rules,
+            privacy_defaults={
+                "share_full_bracket": (
+                    bool(share_full_bracket_default)
+                    if share_full_bracket_default is not None
+                    else _share_full_bracket_default(baseline.privacy_defaults)
+                )
+            },
+            lock_mode=LOCK_MODE,
+        )
+        saved = await GuildSettingsRepository(
+            self.bot.database.pool
+        ).save_settings_with_audit(
+            settings=settings,
+            actor_user_id=str(ctx.author.id),
+            action="guild_config_updated",
+            details=_settings_audit_details(saved_settings=settings, existing=existing),
+        )
+
+        await ctx.respond(
+            embed=_setup_embed(
+                settings=saved,
+                title="Prediction league configuration updated",
+                live_provider=self.bot.settings.live_results_provider,
+            ),
+            ephemeral=True,
+        )
 
     @admin.command(name="status", description="Show this server's setup status.")
     async def status_command(self, ctx: discord.ApplicationContext) -> None:
@@ -356,12 +584,30 @@ class AdminCog(commands.Cog):
             return
 
         guild_id = _guild_id(ctx)
-        destination = channel or ctx.channel
-        if destination is None or not hasattr(destination, "send"):
-            await ctx.respond("Pick a text channel for the announcement.", ephemeral=True)
+        normalized = kind.strip().lower()
+        if normalized not in {"leaderboard", "rules", "lock", "status"}:
+            await ctx.respond(
+                "Post kind must be one of: leaderboard, rules, lock, status.",
+                ephemeral=True,
+            )
             return
 
-        normalized = kind.strip().lower()
+        settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
+        destination = channel or _configured_post_channel(
+            ctx=ctx,
+            settings=settings,
+            kind=normalized,
+        )
+        if destination is None or not hasattr(destination, "send"):
+            await ctx.respond(
+                (
+                    "No configured channel is available for that post. "
+                    "Run `/admin setup` or pass `channel:` explicitly."
+                ),
+                ephemeral=True,
+            )
+            return
+
         try:
             embed = await self._announcement_embed(guild_id, normalized)
         except (LeaderboardServiceError, ValueError) as exc:
@@ -480,6 +726,302 @@ def _guild_id(ctx: discord.ApplicationContext) -> str:
     return str(ctx.guild.id)
 
 
+def _new_default_settings(
+    *,
+    guild_id: str,
+    default_timezone: str,
+    live_provider: str,
+) -> GuildSettings:
+    return GuildSettings(
+        guild_id=guild_id,
+        timezone=default_timezone,
+        live_results_provider=live_provider,
+        lock_deadline_utc=None,
+        predictions_open=False,
+        scoring_rules=_default_scoring_rules(),
+        privacy_defaults=dict(DEFAULT_PRIVACY_DEFAULTS),
+        lock_mode=LOCK_MODE,
+    )
+
+
+def _default_scoring_rules() -> dict[str, int]:
+    return asdict(ScoringRules())
+
+
+def _validate_timezone_name(value: str) -> str:
+    timezone_name = value.strip()
+    try:
+        ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(
+            "Timezone must be an IANA timezone name, for example "
+            "`America/New_York`, `America/Chicago`, `America/Denver`, "
+            "`America/Los_Angeles`, or `UTC`."
+        ) from exc
+    return timezone_name
+
+
+def _resolve_lock_deadline(
+    *,
+    existing: GuildSettings | None,
+    timezone_name: str,
+    lock_deadline_local: str | None,
+    clear_lock_deadline: bool,
+) -> datetime | None:
+    if clear_lock_deadline:
+        return None
+    if lock_deadline_local:
+        return _parse_local_datetime(lock_deadline_local, timezone_name)
+    return existing.lock_deadline_utc if existing else None
+
+
+def _parse_local_datetime(value: str, timezone_name: str) -> datetime:
+    normalized = value.strip()
+    if normalized.endswith("Z") or "+" in normalized[10:] or "-" in normalized[10:]:
+        raise ValueError(
+            "lock_deadline_local should be a local time without a UTC offset, "
+            "for example `2026-06-11 12:00`."
+        )
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(
+            "lock_deadline_local must look like `2026-06-11 12:00` "
+            "or `2026-06-11T12:00`."
+        ) from exc
+    if parsed.tzinfo is not None:
+        raise ValueError("lock_deadline_local should not include a timezone offset.")
+    return parsed.replace(tzinfo=ZoneInfo(timezone_name)).astimezone(timezone.utc)
+
+
+def _updated_scoring_rules(
+    *,
+    baseline: dict[str, object],
+    use_default_scoring: bool,
+    group_winner: int | None,
+    group_runner_up: int | None,
+    group_third_place_qualifier: int | None,
+    round_of_32_advancement: int | None,
+    round_of_16_advancement: int | None,
+    quarter_final_advancement: int | None,
+    semi_final_advancement: int | None,
+    final_advancement: int | None,
+    third_place_winner: int | None,
+    champion: int | None,
+    runner_up: int | None,
+) -> dict[str, int]:
+    rules = _default_scoring_rules() if use_default_scoring else asdict(ScoringRules.from_mapping(baseline))
+    updates = {
+        "group_winner": group_winner,
+        "group_runner_up": group_runner_up,
+        "group_third_place_qualifier": group_third_place_qualifier,
+        "round_of_32_advancement": round_of_32_advancement,
+        "round_of_16_advancement": round_of_16_advancement,
+        "quarter_final_advancement": quarter_final_advancement,
+        "semi_final_advancement": semi_final_advancement,
+        "final_advancement": final_advancement,
+        "third_place_winner": third_place_winner,
+        "champion": champion,
+        "runner_up": runner_up,
+    }
+    for key, raw_value in updates.items():
+        if raw_value is not None:
+            rules[key] = _positive_score(key, raw_value)
+    return rules
+
+
+def _positive_score(name: str, value: int) -> int:
+    if value < 0:
+        raise ValueError(f"{name} must be zero or greater.")
+    return value
+
+
+def _scoring_option_values(**values: int | None) -> tuple[int | None, ...]:
+    return tuple(values.values())
+
+
+def _config_has_updates(
+    *,
+    announcement_channel: object | None,
+    leaderboard_channel: object | None,
+    timezone_name: str | None,
+    share_full_bracket_default: bool | None,
+    lock_deadline_local: str | None,
+    clear_lock_deadline: bool,
+    use_default_scoring: bool,
+    scoring_values: tuple[int | None, ...],
+) -> bool:
+    return any(
+        (
+            announcement_channel is not None,
+            leaderboard_channel is not None,
+            bool(timezone_name),
+            share_full_bracket_default is not None,
+            bool(lock_deadline_local),
+            clear_lock_deadline,
+            use_default_scoring,
+            any(value is not None for value in scoring_values),
+        )
+    )
+
+
+def _share_full_bracket_default(privacy_defaults: dict[str, object]) -> bool:
+    return bool(privacy_defaults.get("share_full_bracket", False))
+
+
+def _settings_audit_details(
+    *,
+    saved_settings: GuildSettings,
+    existing: GuildSettings | None,
+) -> dict[str, object]:
+    return {
+        "before": _settings_snapshot(existing) if existing else None,
+        "after": _settings_snapshot(saved_settings),
+    }
+
+
+def _settings_snapshot(settings: GuildSettings) -> dict[str, object]:
+    return {
+        "announcement_channel_id": settings.announcement_channel_id,
+        "leaderboard_channel_id": settings.leaderboard_channel_id,
+        "timezone": settings.timezone,
+        "privacy_defaults": settings.privacy_defaults,
+        "scoring_rules": settings.scoring_rules,
+        "lock_mode": settings.lock_mode,
+        "lock_deadline_utc": (
+            settings.lock_deadline_utc.isoformat()
+            if settings.lock_deadline_utc
+            else None
+        ),
+        "predictions_open": settings.predictions_open,
+        "live_results_provider": settings.live_results_provider,
+    }
+
+
+def _existing_channel(settings: GuildSettings | None, name: str) -> str | None:
+    if settings is None:
+        return None
+    value = getattr(settings, name)
+    return str(value) if value else None
+
+
+def _channel_id(channel: object | None) -> str | None:
+    if channel is None:
+        return None
+    if isinstance(channel, str):
+        return channel
+    value = getattr(channel, "id", None)
+    return str(value) if value is not None else None
+
+
+def _is_text_channel(channel: object | None) -> bool:
+    return channel is not None and hasattr(channel, "id") and hasattr(channel, "send")
+
+
+def _configured_post_channel(
+    *,
+    ctx: discord.ApplicationContext,
+    settings: GuildSettings | None,
+    kind: str,
+) -> object | None:
+    if settings is None:
+        return None
+    channel_id = (
+        settings.leaderboard_channel_id
+        if kind == "leaderboard"
+        else settings.announcement_channel_id
+    )
+    if not channel_id or ctx.guild is None or not hasattr(ctx.guild, "get_channel"):
+        return None
+    try:
+        return ctx.guild.get_channel(int(channel_id))
+    except ValueError:
+        return None
+
+
+def _setup_embed(
+    *,
+    settings: GuildSettings,
+    title: str,
+    live_provider: str,
+) -> discord.Embed:
+    embed = discord.Embed(title=title, color=discord.Color.green())
+    embed.add_field(
+        name="Prediction announcement channel",
+        value=_format_channel(settings.announcement_channel_id),
+        inline=True,
+    )
+    embed.add_field(
+        name="Leaderboard channel",
+        value=_format_channel(settings.leaderboard_channel_id),
+        inline=True,
+    )
+    embed.add_field(name="Timezone", value=settings.timezone, inline=True)
+    embed.add_field(
+        name="Privacy default",
+        value=(
+            "Full brackets shared by default"
+            if _share_full_bracket_default(settings.privacy_defaults)
+            else "Full brackets private by default"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Lock deadline",
+        value=_format_lock_deadline_with_local(
+            settings.lock_deadline_utc,
+            settings.timezone,
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Scoring defaults",
+        value=_format_scoring_rules(ScoringRules.from_mapping(settings.scoring_rules)),
+        inline=False,
+    )
+    embed.add_field(
+        name="Live provider",
+        value=f"`{live_provider}` (operator configured)",
+        inline=True,
+    )
+    embed.add_field(
+        name="Predictions",
+        value="Open" if settings.predictions_open else "Closed",
+        inline=True,
+    )
+    embed.set_footer(
+        text="Next: import tournament data if needed, post rules/status, then open predictions when ready."
+    )
+    return embed
+
+
+def _format_channel(channel_id: str | None) -> str:
+    return f"<#{channel_id}>" if channel_id else "Not configured"
+
+
+def _format_lock_deadline_with_local(deadline: datetime | None, timezone_name: str) -> str:
+    if deadline is None:
+        return "First tournament kickoff"
+    local_deadline = deadline.astimezone(ZoneInfo(timezone_name))
+    return (
+        f"{local_deadline:%Y-%m-%d %H:%M %Z} "
+        f"({deadline:%Y-%m-%d %H:%M UTC})"
+    )
+
+
+def _format_scoring_rules(rules: ScoringRules) -> str:
+    return (
+        f"Groups: winner {rules.group_winner}, runner-up {rules.group_runner_up}, "
+        f"third-place qualifier {rules.group_third_place_qualifier}\n"
+        f"Knockout: R32 {rules.round_of_32_advancement}, "
+        f"R16 {rules.round_of_16_advancement}, "
+        f"QF {rules.quarter_final_advancement}, SF {rules.semi_final_advancement}, "
+        f"Final {rules.final_advancement}\n"
+        f"Placements: third place {rules.third_place_winner}, "
+        f"champion {rules.champion}, runner-up {rules.runner_up}"
+    )
+
+
 def _success_embed(
     *,
     title: str,
@@ -561,7 +1103,34 @@ def _status_embed(
     )
     embed.add_field(
         name="Live provider",
-        value=settings.live_results_provider if settings else default_provider,
+        value=f"`{default_provider}` (operator configured)",
+        inline=True,
+    )
+    embed.add_field(
+        name="Prediction announcement channel",
+        value=(
+            _format_channel(settings.announcement_channel_id)
+            if settings
+            else "Not configured"
+        ),
+        inline=True,
+    )
+    embed.add_field(
+        name="Leaderboard channel",
+        value=(
+            _format_channel(settings.leaderboard_channel_id)
+            if settings
+            else "Not configured"
+        ),
+        inline=True,
+    )
+    embed.add_field(
+        name="Privacy default",
+        value=(
+            "Full brackets shared by default"
+            if settings and _share_full_bracket_default(settings.privacy_defaults)
+            else "Full brackets private by default"
+        ),
         inline=True,
     )
     embed.add_field(

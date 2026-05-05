@@ -1,6 +1,6 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 5 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images, preferences, admin posting, exports, and backups.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 7 from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, tournament config validation/import, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images, preferences, guided admin setup/configuration, admin posting, exports, and backups.
 
 ## Current Command Surface
 
@@ -15,6 +15,8 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/rank [user]` shows a user's current shared rank and point totals after scores have been recalculated.
 - `/points [user]` shows a user's group/knockout point breakdown after scores have been recalculated.
 - `/rules` shows scoring and lock behavior.
+- `/admin setup [announcement_channel] [leaderboard_channel] [timezone_name] [share_full_bracket_default] [lock_deadline_local] [clear_lock_deadline]` configures the server's prediction announcement channel, leaderboard channel, timezone, privacy default, default scoring, and lock deadline.
+- `/admin config [...]` views or updates configured channels, timezone, privacy default, lock deadline, and scoring values after setup.
 - `/admin status` shows setup status for the current server, including active tournament data.
 - `/admin import [path] [validate_only]` validates a tournament JSON file under `config/` and imports it for the current server when valid.
 - `/admin open` opens prediction entry.
@@ -22,7 +24,7 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/admin lock [deadline_utc] [clear]` sets or clears the full-bracket lock deadline. Use ISO-8601 UTC timestamps such as `2026-06-11T18:00:00Z`.
 - `/admin sync [run]` shows the latest live result sync status, or triggers a manual sync when `run:True`.
 - `/admin recalc` recalculates submitted prediction scores from stored results.
-- `/admin post [kind] [channel]` posts `leaderboard`, `rules`, `lock`, or `status` snapshots to a channel.
+- `/admin post [kind] [channel]` posts `leaderboard`, `rules`, `lock`, or `status` snapshots to configured channels by default, or to an explicit override channel.
 - `/admin export` returns a JSON export of submitted predictions and current scores.
 - `/admin backup` returns an operator-friendly JSON backup of league settings, active tournament config, predictions, scores, stored results, and recent sync runs.
 
@@ -78,6 +80,8 @@ Optional environment variables:
 - `OWNER_USER_IDS`, comma-separated Discord IDs
 - `DEFAULT_TIMEZONE`, default `America/Indiana/Indianapolis`
 - `LIVE_RESULTS_PROVIDER`, default `fifa_public_calendar`
+
+`LIVE_RESULTS_PROVIDER` is operator-level configuration. Individual Discord servers cannot select a live provider yet.
 
 ## Running The Bot
 
@@ -151,7 +155,7 @@ Successful imports are stored in PostgreSQL as immutable config snapshots and ma
 
 Prediction entry is private and submit-based:
 
-- Admins import tournament data, then run `/admin open`.
+- Admins run `/admin setup`, import tournament data, then run `/admin open`.
 - `/predict` walks members through group ranking, predicted advancing third-place teams, and knockout winners.
 - Group ranking is captured one position at a time so ordering is explicit.
 - The Round of 32 is seeded automatically from group predictions, selected third-place qualifiers, and the imported allocation table.
@@ -189,11 +193,31 @@ Manual recalculation without fetching new provider data:
 /admin recalc
 ```
 
-Scoring uses the MVP defaults from `PRODUCT-SPEC.md`: group winner 3, group runner-up 2, third-place qualifier 1, Round of 32 1, Round of 16 2, quarter-final 5, semi-final 10, final 15, third-place winner 10, champion 25, and runner-up 15. Group winner/runner-up and best-third points are awarded only after the relevant group stage data is complete. Knockout points are team-advancement based: a user gets credit when a predicted team reaches the scored round, even if the exact path differs.
+Scoring uses the MVP defaults from `PRODUCT-SPEC.md`: group winner 3, group runner-up 2, third-place qualifier 1, Round of 32 1, Round of 16 2, quarter-final 5, semi-final 10, final 15, third-place winner 10, champion 25, and runner-up 15. Admins can adjust those values with `/admin config`. Group winner/runner-up and best-third points are awarded only after the relevant group stage data is complete. Knockout points are team-advancement based: a user gets credit when a predicted team reaches the scored round, even if the exact path differs.
+
+## Admin Setup And Configuration
+
+Run setup from the server where the league will live:
+
+```text
+/admin setup announcement_channel:#world-cup leaderboard_channel:#leaderboard timezone_name:America/New_York lock_deadline_local:2026-06-11 12:00
+```
+
+The prediction announcement channel is used for public league notices such as rules, lock reminders, prediction open/closed status, and status snapshots. Private prediction entry still happens through ephemeral `/predict` and `/edit` flows.
+
+Timezone values must be IANA names such as `America/New_York`, `America/Chicago`, `America/Denver`, `America/Los_Angeles`, or `UTC`. `lock_deadline_local` is interpreted in the configured server timezone and stored in UTC.
+
+Use `/admin config` with no options to view current settings. Pass only the options you want to change, for example:
+
+```text
+/admin config timezone_name:America/Chicago
+/admin config share_full_bracket_default:False
+/admin config champion:30 runner_up:20
+```
 
 ## Admin Posting, Export, And Backup
 
-Admins can post snapshots without manually composing announcements:
+Admins can post snapshots without manually composing announcements. Leaderboards default to the configured leaderboard channel; rules, lock, and status posts default to the configured prediction announcement channel. Pass `channel:` to override the default destination.
 
 ```text
 /admin post kind:leaderboard

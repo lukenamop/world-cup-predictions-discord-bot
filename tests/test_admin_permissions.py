@@ -54,6 +54,46 @@ class AdminLockDeadlineParsingTests(unittest.TestCase):
             admin_module._parse_utc_datetime("2026-06-11T18:00:00-04:00")
 
 
+class AdminSetupConfigHelperTests(unittest.TestCase):
+    def test_parse_local_datetime_uses_configured_timezone(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+
+        parsed = admin_module._parse_local_datetime(
+            "2026-06-11 12:00",
+            "America/New_York",
+        )
+
+        self.assertEqual(parsed, datetime(2026, 6, 11, 16, 0, tzinfo=timezone.utc))
+
+    def test_validate_timezone_name_guides_invalid_values(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+
+        with self.assertRaisesRegex(ValueError, "America/New_York"):
+            admin_module._validate_timezone_name("Eastern")
+
+    def test_updated_scoring_rules_applies_only_requested_values(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+
+        rules = admin_module._updated_scoring_rules(
+            baseline={"champion": 25, "runner_up": 15},
+            use_default_scoring=False,
+            group_winner=None,
+            group_runner_up=None,
+            group_third_place_qualifier=None,
+            round_of_32_advancement=None,
+            round_of_16_advancement=None,
+            quarter_final_advancement=None,
+            semi_final_advancement=None,
+            final_advancement=None,
+            third_place_winner=None,
+            champion=30,
+            runner_up=None,
+        )
+
+        self.assertEqual(rules["champion"], 30)
+        self.assertEqual(rules["runner_up"], 15)
+
+
 class _FakeContext:
     def __init__(self, *, guild: object | None, manage_guild: bool) -> None:
         self.guild = guild
