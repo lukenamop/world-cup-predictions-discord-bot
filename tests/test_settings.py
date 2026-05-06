@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 
+from world_cup_bot.bot import scheduled_result_sync_enabled
 from world_cup_bot.settings import AppSettings, SettingsError, mask_database_url
 
 
@@ -88,3 +90,17 @@ class SettingsTests(unittest.TestCase):
             "postgresql://world_cup_bot:***@db.example.com:5432/world_cup_bot",
         )
         self.assertNotIn("super-secret", masked)
+
+
+class ScheduledSyncGateTests(unittest.TestCase):
+    def test_scheduled_sync_waits_until_first_matchday_midnight_utc(self) -> None:
+        self.assertFalse(
+            scheduled_result_sync_enabled(
+                datetime(2026, 6, 10, 23, 59, tzinfo=timezone.utc)
+            )
+        )
+        self.assertTrue(
+            scheduled_result_sync_enabled(
+                datetime(2026, 6, 11, 0, 0, tzinfo=timezone.utc)
+            )
+        )

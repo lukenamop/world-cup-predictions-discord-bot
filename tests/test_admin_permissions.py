@@ -247,8 +247,11 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             "Config `fifa-world-cup-2026`, version `3b3023f182d9`",
             _field_value(embed, "Tournament"),
         )
-        self.assertIn("/admin post kind: rules", _field_value(embed, "Next steps"))
-        self.assertIn("/admin open", _field_value(embed, "Next steps"))
+        self.assertEqual(
+            _field_value(embed, "Next steps"),
+            "When the league is ready, run `/admin open`. Then run "
+            "`/admin post kind: rules`, and `/admin post kind: lock`.",
+        )
         self.assertIsNone(embed.footer)
         self.assertNotIn("Live provider", [field.name for field in embed.fields])
 
@@ -291,6 +294,10 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         )
         self.assertEqual(_field_value(embed, "Tournament"), "FIFA World Cup 2026")
         self.assertEqual(
+            _field_value(embed, "Bracket visibility"),
+            "Full brackets are private by default. Use `/preferences` to share yours.",
+        )
+        self.assertEqual(
             _field_value(embed, "Group stage points"),
             "Group winner +3, group runner-up +2, advancing third-place team +1",
         )
@@ -304,6 +311,21 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             _field_value(embed, "Exact placement points"),
             "Champion +25, runner-up +15, third-place +10",
         )
+
+    def test_lock_embed_includes_public_tournament_context(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+        settings = types.SimpleNamespace(
+            predictions_open=True,
+            lock_deadline_utc=datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc),
+        )
+        tournament = types.SimpleNamespace(tournament_name="FIFA World Cup 2026")
+
+        embed = admin_module._lock_embed(settings=settings, tournament=tournament)
+
+        self.assertEqual(embed.title, "Prediction Lock")
+        self.assertEqual(_field_value(embed, "Tournament"), "FIFA World Cup 2026")
+        self.assertEqual(_field_value(embed, "Status"), "Open")
+        self.assertIn("<t:1781200800:F>", _field_value(embed, "Deadline"))
 
 
 class _FakeContext:

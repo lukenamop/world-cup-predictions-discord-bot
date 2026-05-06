@@ -22,7 +22,7 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/admin close` closes prediction entry without changing the lock deadline.
 - `/admin lock [deadline_utc] [clear]` sets or clears the full-bracket lock deadline. Use ISO-8601 UTC timestamps such as `2026-06-11T18:00:00Z`.
 - `/admin recalc` recalculates submitted prediction scores from stored results.
-- `/admin post [kind] [channel]` posts `leaderboard`, `rules`, `lock`, `status`, or `reminder` snapshots to configured channels by default, or to an explicit override channel.
+- `/admin post [kind] [channel]` posts `leaderboard`, `rules`, `lock`, or `reminder` snapshots to configured channels by default, or to an explicit override channel.
 - `/admin export` returns a JSON export of submitted predictions and current scores.
 - `/admin backup` returns an operator-friendly JSON backup of league settings, active tournament config, predictions, scores, stored results, and recent sync runs.
 - `/operator sync` runs one global live-result sync for all configured guilds. It is registered only in `OPERATOR_GUILD_ID` and requires Discord Administrator permission or an ID listed in `OWNER_USER_IDS`.
@@ -183,7 +183,7 @@ Manual sync:
 /operator sync
 ```
 
-The bot also starts a 30-minute background sync loop after startup. Scheduled sync fetches once per provider/config feed, applies results to all configured guilds, writes `match_results` and `result_sync_runs`, caches provider response payloads for debugging, logs delayed-provider warnings once, and recalculates scores for submitted predictions.
+The bot also starts a 30-minute background sync loop after startup. Scheduled sync does not fetch the provider endpoint before `2026-06-11T00:00:00Z`, the first matchday midnight in UTC. `/operator sync` is an explicit manual override and attempts a provider fetch even before that date. Once active, scheduled sync fetches once per provider/config feed, applies results to all configured guilds, writes `match_results` and `result_sync_runs`, caches provider response payloads for debugging, logs delayed-provider warnings once, and recalculates scores for submitted predictions.
 
 Manual recalculation without fetching new provider data:
 
@@ -210,7 +210,7 @@ Run setup from the server where the league will live:
 /admin setup announcement_channel:#world-cup leaderboard_channel:#leaderboard lock_deadline_utc:2026-06-11T18:00:00Z
 ```
 
-The prediction announcement channel is used for public league notices such as rules, lock reminders, prediction open/closed status, and status snapshots. Private prediction entry still happens through ephemeral `/predict` and `/edit` flows.
+The prediction announcement channel is used for public league notices such as rules, lock reminders, and prediction open/closed status. Private prediction entry still happens through ephemeral `/predict` and `/edit` flows.
 
 `announcement_channel` and `leaderboard_channel` are required text-channel
 inputs. `lock_deadline_utc` must be an ISO-8601 UTC timestamp such as
@@ -227,13 +227,12 @@ Use `/admin config` with no options to view current settings. Pass only the opti
 
 ## Admin Posting, Export, And Backup
 
-Admins can post snapshots without manually composing announcements. Leaderboards default to the configured leaderboard channel; rules, lock, status, and reminder posts default to the configured prediction announcement channel. Pass `channel:` to override the default destination.
+Admins can post snapshots without manually composing announcements. Leaderboards default to the configured leaderboard channel; rules, lock, and reminder posts default to the configured prediction announcement channel. Pass `channel:` to override the default destination.
 
 ```text
 /admin post kind:leaderboard
 /admin post kind:rules channel:#predictions
 /admin post kind:lock
-/admin post kind:status
 /admin post kind:reminder
 ```
 
@@ -334,7 +333,7 @@ Run this manual flow in the staging guild and record any unexpected response:
 3. Run `/admin status` and verify setup, channels, lock, and tournament status.
 4. Run `/admin config` with no options and verify configured scoring, privacy default, and lock behavior.
 5. Run `/admin open`, then `/rules`, and verify prediction entry is open.
-6. Run `/admin post kind:rules`, `/admin post kind:status`, `/admin post kind:lock`, and `/admin post kind:reminder`; confirm posts land in the announcement channel.
+6. Run `/admin post kind:rules`, `/admin post kind:lock`, and `/admin post kind:reminder`; confirm posts land in the announcement channel.
 7. Run `/predict`, complete a full bracket, and confirm submission succeeds only after the final confirmation.
 8. Run `/prediction`, `/groups`, and `/bracket` for yourself; confirm concise embeds appear with image attachments for the image commands.
 9. Run `/edit`, change at least one submitted pick, complete the flow, and confirm the previous submission remains active until final confirmation.

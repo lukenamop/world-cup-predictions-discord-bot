@@ -77,6 +77,16 @@ class CommandOptionMetadataTests(unittest.TestCase):
                         f"{path.name}:{function.name}.{argument.arg} should use {expected_type}.",
                     )
 
+    def test_admin_post_choices_keep_status_private(self) -> None:
+        tree = ast.parse(
+            (PROJECT_ROOT / "world_cup_bot" / "cogs" / "admin.py").read_text()
+        )
+        post_command = _function_by_name(tree, "post_command")
+
+        choices = _option_choices(post_command, "kind")
+
+        self.assertEqual(choices, ["leaderboard", "rules", "lock", "reminder"])
+
 
 def _command_functions(tree: ast.AST) -> list[ast.AsyncFunctionDef]:
     functions: list[ast.AsyncFunctionDef] = []
@@ -117,6 +127,32 @@ def _option_decorator_names(function: ast.AsyncFunctionDef) -> set[str]:
         if isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str):
             names.add(name_arg.value)
     return names
+
+
+def _option_choices(function: ast.AsyncFunctionDef, option_name: str) -> list[str]:
+    for decorator in function.decorator_list:
+        if not isinstance(decorator, ast.Call):
+            continue
+        if not isinstance(decorator.func, ast.Attribute):
+            continue
+        if decorator.func.attr != "option":
+            continue
+        if not decorator.args:
+            continue
+        name_arg = decorator.args[0]
+        if not isinstance(name_arg, ast.Constant) or name_arg.value != option_name:
+            continue
+        for keyword in decorator.keywords:
+            if keyword.arg != "choices":
+                continue
+            if not isinstance(keyword.value, ast.List):
+                raise AssertionError(f"{function.name}.{option_name} choices must be a list")
+            return [
+                element.value
+                for element in keyword.value.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            ]
+    raise AssertionError(f"Missing choices for {function.name}.{option_name}")
 
 
 def _command_arguments(function: ast.AsyncFunctionDef) -> list[ast.arg]:

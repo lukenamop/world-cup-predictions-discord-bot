@@ -34,6 +34,7 @@ class LiveResultsClient(Protocol):
 
 class FifaPublicCalendarClient:
     provider_name = "fifa_public_calendar"
+    user_agent = "WCPredictionsDiscordBot/1.0 (contact: lukenamop@gmail.com, interval: 30m)"
 
     def __init__(
         self,
@@ -81,7 +82,10 @@ class FifaPublicCalendarClient:
     def _fetch_matches_sync(self, url: str) -> list[LiveMatchResult]:
         request = Request(
             url,
-            headers={"Accept": "application/json"},
+            headers={
+                "Accept": "application/json",
+                "User-Agent": self.user_agent,
+            },
         )
         payload: Any = None
         for attempt in range(1, self.max_attempts + 1):

@@ -63,8 +63,8 @@ Expected setup flow:
 5. Admin opens predictions.
 
 The prediction announcement channel is the default public destination for
-prediction-related league notices such as rules, lock notices, reminders,
-open/closed status, and setup/status posts. It is not used for private
+prediction-related league notices such as rules, lock notices, reminders, and
+open/closed status. It is not used for private
 prediction entry; `/predict` and `/edit` remain private user flows. Live results
 provider selection is operator-level for now through `LIVE_RESULTS_PROVIDER`, not
 configurable per Discord server. Guild admins cannot import alternate tournament

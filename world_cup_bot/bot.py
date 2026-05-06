@@ -12,6 +12,7 @@ from world_cup_bot.settings import AppSettings, SettingsError
 
 
 LOGGER = logging.getLogger(__name__)
+SCHEDULED_RESULT_SYNC_START_AT = datetime(2026, 6, 11, tzinfo=timezone.utc)
 COGS = (
     "world_cup_bot.cogs.foundation",
     "world_cup_bot.cogs.admin",
@@ -44,6 +45,12 @@ async def run_bot() -> None:
 
     @tasks.loop(minutes=30)
     async def result_sync_loop() -> None:
+        if not scheduled_result_sync_enabled():
+            LOGGER.info(
+                "Result sync job skipped before tournament start; starts_at=%s",
+                SCHEDULED_RESULT_SYNC_START_AT.isoformat(),
+            )
+            return
         await sync_all_active_guilds(bot)
 
     @bot.event
@@ -118,6 +125,13 @@ async def _sync_commands(bot: Any) -> datetime | None:
 
     bot.command_sync_status = "succeeded"
     return datetime.now(timezone.utc)
+
+
+def scheduled_result_sync_enabled(now: datetime | None = None) -> bool:
+    checked_at = now or datetime.now(timezone.utc)
+    if checked_at.tzinfo is None or checked_at.utcoffset() is None:
+        checked_at = checked_at.replace(tzinfo=timezone.utc)
+    return checked_at.astimezone(timezone.utc) >= SCHEDULED_RESULT_SYNC_START_AT
 
 
 if __name__ == "__main__":

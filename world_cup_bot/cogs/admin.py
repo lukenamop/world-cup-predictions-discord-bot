@@ -690,7 +690,7 @@ class AdminCog(commands.Cog):
         "kind",
         str,
         description="Snapshot type to post.",
-        choices=["leaderboard", "rules", "lock", "status", "reminder"],
+        choices=["leaderboard", "rules", "lock", "reminder"],
     )
     @discord.option(
         "channel",
@@ -704,7 +704,7 @@ class AdminCog(commands.Cog):
         kind: discord.Option(
             str,
             "Snapshot type to post.",
-            choices=["leaderboard", "rules", "lock", "status", "reminder"],
+            choices=["leaderboard", "rules", "lock", "reminder"],
         ) = "leaderboard",
         channel: discord.Option(
             discord.TextChannel,
@@ -717,9 +717,9 @@ class AdminCog(commands.Cog):
 
         guild_id = _guild_id(ctx)
         normalized = kind.strip().lower()
-        if normalized not in {"leaderboard", "rules", "lock", "status", "reminder"}:
+        if normalized not in {"leaderboard", "rules", "lock", "reminder"}:
             await ctx.respond(
-                "Post kind must be one of: leaderboard, rules, lock, status, reminder.",
+                "Post kind must be one of: leaderboard, rules, lock, reminder.",
                 ephemeral=True,
             )
             return
@@ -834,13 +834,7 @@ class AdminCog(commands.Cog):
             return _lock_embed(settings=settings, tournament=tournament)
         if kind == "reminder":
             return _reminder_embed(settings=settings, tournament=tournament)
-        if kind == "status":
-            return _status_embed(
-                settings=settings,
-                tournament=tournament,
-                command_sync_status=self.bot.command_sync_status,
-            )
-        raise ValueError("Post kind must be one of: leaderboard, rules, lock, status, reminder.")
+        raise ValueError("Post kind must be one of: leaderboard, rules, lock, reminder.")
 
     async def _ensure_admin(self, ctx: discord.ApplicationContext) -> bool:
         if ctx.guild is None:
@@ -1124,8 +1118,8 @@ def _setup_embed(
     embed.add_field(
         name="Next steps",
         value=(
-            "Run `/admin post kind: rules`, then `/admin post kind: status`.\n"
-            "When the league is ready, run `/admin open`."
+            "When the league is ready, run `/admin open`. Then run "
+            "`/admin post kind: rules`, and `/admin post kind: lock`."
         ),
         inline=False,
     )
@@ -1285,6 +1279,15 @@ def _rules_embed(*, settings: object, tournament: object) -> discord.Embed:
     if tournament is not None:
         embed.add_field(name="Tournament", value=tournament.tournament_name, inline=False)
     embed.add_field(
+        name="Bracket visibility",
+        value=(
+            "Full brackets are public by default. Use `/preferences` to change yours."
+            if settings and _share_full_bracket_default(settings.privacy_defaults)
+            else "Full brackets are private by default. Use `/preferences` to share yours."
+        ),
+        inline=False,
+    )
+    embed.add_field(
         name="Group stage points",
         value=(
             f"Group winner {_format_points(rules.group_winner)}, "
@@ -1321,6 +1324,8 @@ def _rules_embed(*, settings: object, tournament: object) -> discord.Embed:
 
 def _lock_embed(*, settings: object, tournament: object | None = None) -> discord.Embed:
     embed = discord.Embed(title="Prediction Lock", color=discord.Color.gold())
+    if tournament is not None:
+        embed.add_field(name="Tournament", value=tournament.tournament_name, inline=False)
     embed.add_field(
         name="Status",
         value="Open" if settings and settings.predictions_open else "Closed",
