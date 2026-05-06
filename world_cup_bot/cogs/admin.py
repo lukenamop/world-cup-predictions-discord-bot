@@ -50,13 +50,11 @@ class AdminCog(commands.Cog):
         announcement_channel: discord.Option(
             discord.TextChannel,
             "Text channel for prediction notices and reminders.",
-            required=False,
-        ) = None,
+        ),
         leaderboard_channel: discord.Option(
             discord.TextChannel,
             "Text channel for leaderboard posts.",
-            required=False,
-        ) = None,
+        ),
         timezone_name: discord.Option(
             str,
             "IANA timezone for local deadlines, such as America/New_York.",
@@ -72,10 +70,6 @@ class AdminCog(commands.Cog):
             "Local lock deadline like 2026-06-11 12:00.",
             required=False,
         ) = None,
-        clear_lock_deadline: discord.Option(
-            bool,
-            "Clear the configured lock deadline during setup.",
-        ) = False,
     ) -> None:
         if not await self._ensure_admin(ctx):
             return
@@ -90,25 +84,16 @@ class AdminCog(commands.Cog):
                 existing=existing,
                 timezone_name=configured_timezone,
                 lock_deadline_local=lock_deadline_local,
-                clear_lock_deadline=clear_lock_deadline,
+                clear_lock_deadline=False,
             )
         except ValueError as exc:
             await ctx.respond(str(exc), ephemeral=True)
             return
 
-        default_channel = ctx.channel if _is_text_channel(ctx.channel) else None
         settings = GuildSettings(
             guild_id=guild_id,
-            announcement_channel_id=_channel_id(
-                announcement_channel
-                or _existing_channel(existing, "announcement_channel_id")
-                or default_channel
-            ),
-            leaderboard_channel_id=_channel_id(
-                leaderboard_channel
-                or _existing_channel(existing, "leaderboard_channel_id")
-                or default_channel
-            ),
+            announcement_channel_id=_channel_id(announcement_channel),
+            leaderboard_channel_id=_channel_id(leaderboard_channel),
             timezone=configured_timezone,
             live_results_provider=self.bot.settings.live_results_provider,
             lock_deadline_utc=lock_deadline_utc,
@@ -904,13 +889,6 @@ def _settings_snapshot(settings: GuildSettings) -> dict[str, object]:
     }
 
 
-def _existing_channel(settings: GuildSettings | None, name: str) -> str | None:
-    if settings is None:
-        return None
-    value = getattr(settings, name)
-    return str(value) if value else None
-
-
 def _channel_id(channel: object | None) -> str | None:
     if channel is None:
         return None
@@ -918,10 +896,6 @@ def _channel_id(channel: object | None) -> str | None:
         return channel
     value = getattr(channel, "id", None)
     return str(value) if value is not None else None
-
-
-def _is_text_channel(channel: object | None) -> bool:
-    return channel is not None and hasattr(channel, "id") and hasattr(channel, "send")
 
 
 def _configured_post_channel(

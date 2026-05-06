@@ -15,7 +15,7 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/rank [user]` shows a user's current shared rank and point totals after scores have been recalculated.
 - `/points [user]` shows a user's group/knockout point breakdown after scores have been recalculated.
 - `/rules` shows scoring and lock behavior.
-- `/admin setup [announcement_channel] [leaderboard_channel] [timezone_name] [share_full_bracket_default] [lock_deadline_local] [clear_lock_deadline]` configures the server's prediction announcement channel, leaderboard channel, timezone, privacy default, default scoring, lock deadline, and canonical 2026 World Cup tournament data.
+- `/admin setup <announcement_channel> <leaderboard_channel> [timezone_name] [share_full_bracket_default] [lock_deadline_local]` configures the server's prediction announcement channel, leaderboard channel, timezone, privacy default, default scoring, optional lock deadline, and canonical 2026 World Cup tournament data.
 - `/admin config [...]` views or updates configured channels, timezone, privacy default, lock deadline, and scoring values after setup.
 - `/admin status` shows setup status for the current server, including active tournament data.
 - `/admin open` opens prediction entry.
@@ -211,6 +211,10 @@ Run setup from the server where the league will live:
 ```
 
 The prediction announcement channel is used for public league notices such as rules, lock reminders, prediction open/closed status, and status snapshots. Private prediction entry still happens through ephemeral `/predict` and `/edit` flows.
+
+`announcement_channel` and `leaderboard_channel` are required text-channel
+inputs. Use `/admin config clear_lock_deadline:True` or `/admin lock clear:True`
+to clear a configured deadline after setup.
 
 Timezone values must be IANA names such as `America/New_York`, `America/Chicago`, `America/Denver`, `America/Los_Angeles`, or `UTC`. `lock_deadline_local` is interpreted in the configured server timezone and stored in UTC.
 

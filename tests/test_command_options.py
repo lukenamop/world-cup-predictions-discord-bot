@@ -21,6 +21,19 @@ TYPED_OPTION_PARAMS = {
 
 
 class CommandOptionMetadataTests(unittest.TestCase):
+    def test_admin_setup_requires_channels_and_does_not_clear_locks(self) -> None:
+        tree = ast.parse(
+            (PROJECT_ROOT / "world_cup_bot" / "cogs" / "admin.py").read_text()
+        )
+        setup_command = _function_by_name(tree, "setup_command")
+        defaults = _argument_defaults(setup_command)
+
+        self.assertNotIn("clear_lock_deadline", defaults)
+        self.assertIsNone(defaults["announcement_channel"])
+        self.assertIsNone(defaults["leaderboard_channel"])
+        self.assertIsNotNone(defaults["timezone_name"])
+        self.assertIsNotNone(defaults["lock_deadline_local"])
+
     def test_command_arguments_use_described_discord_options(self) -> None:
         for path in COG_PATHS:
             with self.subTest(path=path.name):
@@ -61,6 +74,13 @@ def _command_functions(tree: ast.AST) -> list[ast.AsyncFunctionDef]:
     return functions
 
 
+def _function_by_name(tree: ast.AST, name: str) -> ast.AsyncFunctionDef:
+    for function in _command_functions(tree):
+        if function.name == name:
+            return function
+    raise AssertionError(f"Missing command function: {name}")
+
+
 def _is_command_decorator(decorator: ast.expr) -> bool:
     target = decorator.func if isinstance(decorator, ast.Call) else decorator
     if isinstance(target, ast.Attribute):
@@ -74,6 +94,17 @@ def _command_arguments(function: ast.AsyncFunctionDef) -> list[ast.arg]:
         for argument in function.args.args
         if argument.arg not in {"self", "ctx"} and argument.annotation is not None
     ]
+
+
+def _argument_defaults(function: ast.AsyncFunctionDef) -> dict[str, ast.expr | None]:
+    arguments = function.args.args
+    defaults = [None] * (len(arguments) - len(function.args.defaults))
+    defaults.extend(function.args.defaults)
+    return {
+        argument.arg: default
+        for argument, default in zip(arguments, defaults)
+        if argument.arg not in {"self", "ctx"}
+    }
 
 
 if __name__ == "__main__":
