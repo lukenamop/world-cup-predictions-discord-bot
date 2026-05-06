@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from typing import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
@@ -15,6 +16,7 @@ from world_cup_bot.data.repositories import (
     GuildSettingsRepository,
     TournamentConfigRepository,
 )
+from world_cup_bot.domain.locks import effective_lock_deadline
 from world_cup_bot.domain.scoring import ScoringRules
 from world_cup_bot.services.export_service import ExportService, ExportServiceError
 from world_cup_bot.services.leaderboard_service import (
@@ -29,6 +31,14 @@ from world_cup_bot.services.tournament_import import (
 
 DEFAULT_PRIVACY_DEFAULTS = {"share_full_bracket": False}
 LOCK_MODE = "full_bracket_lock"
+
+
+@dataclass(frozen=True)
+class TournamentEmbedContext:
+    tournament_id: str
+    tournament_name: str
+    config_hash: str
+    first_kickoff_utc: datetime | None = None
 
 
 class AdminCog(commands.Cog):
@@ -163,7 +173,6 @@ class AdminCog(commands.Cog):
             embed=_setup_embed(
                 settings=saved,
                 title="Prediction league setup saved",
-                live_provider=self.bot.settings.live_results_provider,
                 tournament=tournament,
             ),
             ephemeral=True,
@@ -433,7 +442,6 @@ class AdminCog(commands.Cog):
                 embed=_setup_embed(
                     settings=existing,
                     title="Prediction league configuration",
-                    live_provider=self.bot.settings.live_results_provider,
                 ),
                 ephemeral=True,
             )
@@ -511,7 +519,6 @@ class AdminCog(commands.Cog):
             embed=_setup_embed(
                 settings=saved,
                 title="Prediction league configuration updated",
-                live_provider=self.bot.settings.live_results_provider,
                 tournament=tournament,
             ),
             ephemeral=True,
@@ -533,7 +540,6 @@ class AdminCog(commands.Cog):
                 settings=settings,
                 tournament=tournament,
                 default_timezone=self.bot.settings.default_timezone,
-                default_provider=self.bot.settings.live_results_provider,
                 command_sync_status=self.bot.command_sync_status,
             ),
             ephemeral=True,
@@ -839,7 +845,6 @@ class AdminCog(commands.Cog):
                 settings=settings,
                 tournament=tournament,
                 default_timezone=self.bot.settings.default_timezone,
-                default_provider=self.bot.settings.live_results_provider,
                 command_sync_status=self.bot.command_sync_status,
             )
         raise ValueError("Post kind must be one of: leaderboard, rules, lock, status, reminder.")
@@ -895,12 +900,21 @@ async def _ensure_canonical_tournament_config(
         raise TournamentImportError(
             "Canonical tournament validation did not return a summary."
         )
-    return await TournamentConfigRepository(pool).save_active_import(
+    saved = await TournamentConfigRepository(pool).save_active_import(
         guild_id=guild_id,
         imported_by_user_id=actor_user_id,
         summary=summary,
         config_hash=imported.config_hash,
         config=dict(imported.config),
+    )
+    return TournamentEmbedContext(
+        tournament_id=saved.tournament_id,
+        tournament_name=saved.tournament_name,
+        config_hash=saved.config_hash,
+        first_kickoff_utc=effective_lock_deadline(
+            configured_deadline_utc=None,
+            tournament_config=imported.config,
+        ),
     )
 
 
@@ -1092,17 +1106,16 @@ def _setup_embed(
     *,
     settings: GuildSettings,
     title: str,
-    live_provider: str,
     tournament: object | None = None,
 ) -> discord.Embed:
     embed = discord.Embed(title=title, color=discord.Color.green())
     embed.add_field(
-        name="Prediction announcement channel",
+        name="Announcements",
         value=_format_channel(settings.announcement_channel_id),
         inline=True,
     )
     embed.add_field(
-        name="Leaderboard channel",
+        name="Leaderboard",
         value=_format_channel(settings.leaderboard_channel_id),
         inline=True,
     )
@@ -1110,9 +1123,13 @@ def _setup_embed(
     embed.add_field(
         name="Privacy default",
         value=(
-            "Full brackets shared by default"
+            "Prediction brackets public by default\n"
+            "Users can change this with `/preferences`."
             if _share_full_bracket_default(settings.privacy_defaults)
-            else "Full brackets private by default"
+            else (
+                "Prediction brackets private by default\n"
+                "Users can change this with `/preferences`."
+            )
         ),
         inline=False,
     )
@@ -1121,6 +1138,7 @@ def _setup_embed(
         value=_format_lock_deadline_with_local(
             settings.lock_deadline_utc,
             settings.timezone,
+            tournament=tournament,
         ),
         inline=False,
     )
@@ -1129,17 +1147,12 @@ def _setup_embed(
         value=_format_scoring_rules(ScoringRules.from_mapping(settings.scoring_rules)),
         inline=False,
     )
-    embed.add_field(
-        name="Live provider",
-        value=f"`{live_provider}` (operator configured)",
-        inline=True,
-    )
     if tournament is not None:
         embed.add_field(
-            name="Tournament data",
+            name="Tournament",
             value=(
                 f"{tournament.tournament_name}\n"
-                f"`{tournament.tournament_id}` / hash `{tournament.config_hash[:12]}`"
+                f"Config `{tournament.tournament_id}`, version `{tournament.config_hash[:12]}`"
             ),
             inline=False,
         )
@@ -1148,8 +1161,13 @@ def _setup_embed(
         value="Open" if settings.predictions_open else "Closed",
         inline=True,
     )
-    embed.set_footer(
-        text="Next: import tournament data if needed, post rules/status, then open predictions when ready."
+    embed.add_field(
+        name="Next steps",
+        value=(
+            "Run `/admin post kind: rules`, then `/admin post kind: status`.\n"
+            "When the league is ready, run `/admin open`."
+        ),
+        inline=False,
     )
     return embed
 
@@ -1158,9 +1176,24 @@ def _format_channel(channel_id: str | None) -> str:
     return f"<#{channel_id}>" if channel_id else "Not configured"
 
 
-def _format_lock_deadline_with_local(deadline: datetime | None, timezone_name: str) -> str:
+def _format_lock_deadline_with_local(
+    deadline: datetime | None,
+    timezone_name: str,
+    *,
+    tournament: object | None = None,
+) -> str:
     if deadline is None:
-        return "First tournament kickoff"
+        first_kickoff = _first_kickoff_utc(tournament)
+        if first_kickoff is None:
+            return "Auto-locks at first tournament kickoff"
+        return "Auto-locks at first kickoff\n" + _format_datetime_with_local(
+            first_kickoff,
+            timezone_name,
+        )
+    return _format_datetime_with_local(deadline, timezone_name)
+
+
+def _format_datetime_with_local(deadline: datetime, timezone_name: str) -> str:
     local_deadline = deadline.astimezone(ZoneInfo(timezone_name))
     return (
         f"{local_deadline:%Y-%m-%d %H:%M %Z} "
@@ -1170,15 +1203,34 @@ def _format_lock_deadline_with_local(deadline: datetime | None, timezone_name: s
 
 def _format_scoring_rules(rules: ScoringRules) -> str:
     return (
-        f"Groups: winner {rules.group_winner}, runner-up {rules.group_runner_up}, "
-        f"third-place qualifier {rules.group_third_place_qualifier}\n"
-        f"Knockout: R32 {rules.round_of_32_advancement}, "
-        f"R16 {rules.round_of_16_advancement}, "
-        f"QF {rules.quarter_final_advancement}, SF {rules.semi_final_advancement}, "
-        f"Final {rules.final_advancement}\n"
-        f"Placements: third place {rules.third_place_winner}, "
-        f"champion {rules.champion}, runner-up {rules.runner_up}"
+        "Group table picks: "
+        f"winner {rules.group_winner}, runner-up {rules.group_runner_up}, "
+        f"advancing third-place team {rules.group_third_place_qualifier}\n"
+        "Knockout advancement: "
+        f"Round of 32 {rules.round_of_32_advancement}, "
+        f"Round of 16 {rules.round_of_16_advancement}, "
+        f"quarter-final {rules.quarter_final_advancement}, "
+        f"semi-final {rules.semi_final_advancement}, finalist {rules.final_advancement}\n"
+        "Final placements: "
+        f"champion {rules.champion}, runner-up {rules.runner_up}, "
+        f"third-place match winner {rules.third_place_winner}\n"
+        "Knockout points are for teams reaching each stage, not exact bracket slots."
     )
+
+
+def _first_kickoff_utc(tournament: object | None) -> datetime | None:
+    if tournament is None:
+        return None
+    value = getattr(tournament, "first_kickoff_utc", None)
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    config = getattr(tournament, "config", None)
+    if isinstance(config, Mapping):
+        return effective_lock_deadline(
+            configured_deadline_utc=None,
+            tournament_config=config,
+        )
+    return None
 
 
 def _status_embed(
@@ -1186,7 +1238,6 @@ def _status_embed(
     settings: object,
     tournament: object,
     default_timezone: str,
-    default_provider: str,
     command_sync_status: str,
 ) -> discord.Embed:
     embed = discord.Embed(
@@ -1233,12 +1284,7 @@ def _status_embed(
         inline=True,
     )
     embed.add_field(
-        name="Live provider",
-        value=f"`{default_provider}` (operator configured)",
-        inline=True,
-    )
-    embed.add_field(
-        name="Prediction announcement channel",
+        name="Announcements",
         value=(
             _format_channel(settings.announcement_channel_id)
             if settings
@@ -1247,7 +1293,7 @@ def _status_embed(
         inline=True,
     )
     embed.add_field(
-        name="Leaderboard channel",
+        name="Leaderboard",
         value=(
             _format_channel(settings.leaderboard_channel_id)
             if settings
@@ -1258,9 +1304,9 @@ def _status_embed(
     embed.add_field(
         name="Privacy default",
         value=(
-            "Full brackets shared by default"
+            "Prediction brackets public by default"
             if settings and _share_full_bracket_default(settings.privacy_defaults)
-            else "Full brackets private by default"
+            else "Prediction brackets private by default"
         ),
         inline=True,
     )

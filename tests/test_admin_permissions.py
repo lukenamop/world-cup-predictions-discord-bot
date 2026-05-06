@@ -210,6 +210,63 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         self.assertIn("/predict", _field_value(embed, "Commands"))
         self.assertIn("2026-06-11 14:00", _field_value(embed, "Deadline"))
 
+    def test_setup_embed_uses_admin_friendly_labels_and_next_steps(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+        settings = admin_module.GuildSettings(
+            guild_id="guild-1",
+            announcement_channel_id="111",
+            leaderboard_channel_id="222",
+            timezone="America/Chicago",
+            live_results_provider="fifa_public_calendar",
+            lock_deadline_utc=None,
+            predictions_open=False,
+            scoring_rules=admin_module._default_scoring_rules(),
+            privacy_defaults={"share_full_bracket": True},
+            lock_mode=admin_module.LOCK_MODE,
+        )
+        tournament = admin_module.TournamentEmbedContext(
+            tournament_id="fifa-world-cup-2026",
+            tournament_name="FIFA World Cup 2026",
+            config_hash="3b3023f182d9abcdef",
+            first_kickoff_utc=datetime(2026, 6, 11, 19, 0, tzinfo=timezone.utc),
+        )
+
+        embed = admin_module._setup_embed(
+            settings=settings,
+            title="Prediction league setup saved",
+            tournament=tournament,
+        )
+
+        self.assertEqual(_field_value(embed, "Announcements"), "<#111>")
+        self.assertEqual(_field_value(embed, "Leaderboard"), "<#222>")
+        self.assertIn(
+            "Prediction brackets public by default",
+            _field_value(embed, "Privacy default"),
+        )
+        self.assertIn("/preferences", _field_value(embed, "Privacy default"))
+        self.assertIn("Auto-locks at first kickoff", _field_value(embed, "Lock deadline"))
+        self.assertIn("2026-06-11 14:00 CDT", _field_value(embed, "Lock deadline"))
+        self.assertIn(
+            "Config `fifa-world-cup-2026`, version `3b3023f182d9`",
+            _field_value(embed, "Tournament"),
+        )
+        self.assertIn("/admin post kind: rules", _field_value(embed, "Next steps"))
+        self.assertIn("/admin open", _field_value(embed, "Next steps"))
+        self.assertIsNone(embed.footer)
+        self.assertNotIn("Live provider", [field.name for field in embed.fields])
+
+    def test_setup_embed_scoring_copy_explains_advancement_points(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+
+        value = admin_module._format_scoring_rules(
+            admin_module.ScoringRules.from_mapping(admin_module._default_scoring_rules())
+        )
+
+        self.assertIn("Group table picks", value)
+        self.assertIn("Knockout advancement", value)
+        self.assertIn("teams reaching each stage", value)
+        self.assertIn("not exact bracket slots", value)
+
 
 class _FakeContext:
     def __init__(
