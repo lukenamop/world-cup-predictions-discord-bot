@@ -11,6 +11,7 @@ from discord.ext import commands
 
 from world_cup_bot.data.repositories import (
     AuditLogRepository,
+    GuildSettings,
     GuildSettingsRepository,
     TournamentConfigRepository,
 )
