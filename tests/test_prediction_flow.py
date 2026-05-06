@@ -210,6 +210,84 @@ class PredictionEntryViewTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertFalse(button_by_label["Previous"].disabled)
         self.assertNotIn("Next", button_by_label)
+        self.assertNotIn("Start over", button_by_label)
+
+    async def test_completed_group_waits_for_next_group_button(self) -> None:
+        view = _prediction_entry_view()
+        _complete_current_group(view)
+
+        self.assertEqual(view.review_group_id, "A")
+        self.assertEqual(view.notice, "Group ranking complete.")
+
+        embed = view.build_embed()
+        self.assertEqual(embed.title, "Group A Complete")
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn("3. Team A3", fields["Current group ranking"])
+        self.assertNotIn("Choices", fields)
+        self.assertNotIn("Pending selection", fields)
+
+        view._refresh_items()
+        labels = [
+            item.label
+            for item in view.children
+            if getattr(item, "label", None) is not None
+        ]
+        self.assertIn("Next group", labels)
+        self.assertIn("Reset group", labels)
+        self.assertNotIn("Next", labels)
+        self.assertNotIn("Start over", labels)
+        self.assertFalse(any(getattr(item, "options", None) for item in view.children))
+
+    async def test_next_group_button_advances_to_next_group(self) -> None:
+        view = _prediction_entry_view()
+        _complete_current_group(view)
+        interaction = _FakeInteraction()
+
+        await view._next_group_callback(interaction)
+
+        self.assertIsNone(view.review_group_id)
+        self.assertIsNone(view.notice)
+        self.assertEqual(interaction.response.embed.title, "Group B: Pick #1")
+
+    async def test_reset_group_button_removes_completed_group(self) -> None:
+        view = _prediction_entry_view()
+        _complete_current_group(view)
+        interaction = _FakeInteraction()
+
+        await view._reset_group_callback(interaction)
+
+        self.assertIsNone(view.review_group_id)
+        self.assertEqual(view.session.data["group_rankings"], {})
+        self.assertEqual(view.notice, "Group A reset. Rank it again.")
+        self.assertEqual(interaction.response.embed.title, "Group A: Pick #1")
+
+    async def test_previous_from_completed_group_removes_final_group_pick(self) -> None:
+        view = _prediction_entry_view()
+        _complete_current_group(view)
+        interaction = _FakeInteraction()
+
+        await view._previous_callback(interaction)
+
+        self.assertIsNone(view.review_group_id)
+        self.assertEqual(view.session.data["group_rankings"], {"A": ["A1", "A2"]})
+        self.assertEqual(interaction.response.embed.title, "Group A: Pick #3")
+
+    async def test_cancel_button_uses_prediction_cancel_handler(self) -> None:
+        view = _prediction_entry_view()
+        view._refresh_items()
+        button_by_label = {
+            item.label: item
+            for item in view.children
+            if getattr(item, "label", None) is not None
+        }
+        interaction = _FakeInteraction()
+
+        await button_by_label["Cancel"].callback(interaction)
+
+        self.assertTrue(view.finished)
+        self.assertEqual(view.children, [])
+        self.assertEqual(view.notice, "Prediction entry cancelled. No changes were submitted.")
+        self.assertEqual(interaction.response.embed.title, "Group A: Pick #1")
 
 
 class PredictionFlowTests(unittest.TestCase):
@@ -439,6 +517,27 @@ def _prediction_entry_view() -> PredictionEntryView:
             data=empty_prediction_data(),
         )
     )
+
+
+def _complete_current_group(view: PredictionEntryView) -> None:
+    for _ in range(view.session.model.format.teams_per_group):
+        step = next_prediction_step(view.session.model, view.session.data)
+        view._stage_or_apply_selection(step, [step.options[0].id])
+
+
+class _FakeResponse:
+    def __init__(self) -> None:
+        self.embed = None
+        self.view = None
+
+    async def edit_message(self, **kwargs: object) -> None:
+        self.embed = kwargs.get("embed")
+        self.view = kwargs.get("view")
+
+
+class _FakeInteraction:
+    def __init__(self) -> None:
+        self.response = _FakeResponse()
 
 
 def _completed_prediction_data(model: TournamentModel) -> dict[str, object]:

@@ -155,7 +155,7 @@ python scripts/validate_tournament.py config/tournaments/2026_world_cup.json
 Prediction entry is private and submit-based:
 
 - Admins run `/admin setup`, then run `/admin open`.
-- `/predict` walks members through group ranking, predicted advancing third-place teams, and knockout winners with private Previous, Next, Start over, Cancel, and final confirmation controls.
+- `/predict` walks members through group ranking, predicted advancing third-place teams, and knockout winners with private Previous, Next, group reset, Cancel, and final confirmation controls. To fully restart, cancel the private session and run `/predict` again.
 - Group ranking is captured one position at a time so ordering is explicit.
 - The Round of 32 is seeded automatically from group predictions, selected third-place qualifiers, and the imported allocation table.
 - Completing `/predict` submits the bracket. There is no supported user-facing saved draft workflow.

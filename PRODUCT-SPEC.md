@@ -97,6 +97,9 @@ replace an already submitted prediction. Existing submitted picks remain active
 until an edit flow is completed and submitted. Users should never manually fill
 the initial Round of 32 bracket.
 
+There is no in-flow full restart control. A member who wants to abandon the
+current private session should cancel it and run `/predict` or `/edit` again.
+
 ### Locking
 
 All predictions lock before the tournament starts. MVP lock mode is `full_bracket_lock`: group-stage picks, third-place qualifier picks, and knockout picks all lock at one deadline before the first match.
@@ -333,8 +336,8 @@ Visual design:
 
 ### 10. Prediction UX And Visual Polish
 
-- Add expected prediction-session controls such as previous, next, cancel, start
-  over, and final confirmation states.
+- Add expected prediction-session controls such as previous, next, group reset,
+  cancel, and final confirmation states.
 - Add reminder announcement support and clearer empty/error states for users and
   admins.
 - Render flag assets beside team names in generated group and bracket images.

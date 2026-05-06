@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 
 from world_cup_bot.domain.predictions import (
+    Group,
     PredictionStep,
     PredictionValidationError,
     TournamentModel,
@@ -18,7 +19,6 @@ from world_cup_bot.domain.predictions import (
     record_group_pick,
     record_knockout_winner,
     record_third_place_qualifiers,
-    restart_prediction_data,
     undo_last_prediction_step,
 )
 from world_cup_bot.services.prediction_service import (
@@ -284,16 +284,22 @@ class PredictionEntryView(discord.ui.View):
         self.session = session
         self.notice: str | None = None
         self.pending_values: list[str] = []
+        self.review_group_id: str | None = None
         self.finished = False
         self._refresh_items()
 
     def build_embed(self) -> discord.Embed:
         model = self.session.model
+        review_group = self._review_group()
         step = next_prediction_step(model, self.session.data)
         progress = prediction_progress(model, self.session.data)
         embed = discord.Embed(
-            title=step.title,
-            description=step.description,
+            title=f"{review_group.label} Complete" if review_group else step.title,
+            description=(
+                "Review this group ranking, then continue."
+                if review_group
+                else step.description
+            ),
             color=discord.Color.blurple(),
         )
         embed.add_field(
@@ -314,7 +320,13 @@ class PredictionEntryView(discord.ui.View):
         if self.notice:
             embed.add_field(name="Status", value=self.notice[:1024], inline=False)
 
-        if step.kind == "group_pick" and step.group_id:
+        if review_group:
+            embed.add_field(
+                name="Current group ranking",
+                value=_format_group_ranking(model, self.session.data, review_group.id),
+                inline=False,
+            )
+        elif step.kind == "group_pick" and step.group_id:
             embed.add_field(
                 name="Current group ranking",
                 value=_format_group_ranking(model, self.session.data, step.group_id),
@@ -332,7 +344,7 @@ class PredictionEntryView(discord.ui.View):
                 value="\n".join(team.short_name for team in step.options)[:1024],
                 inline=False,
             )
-        if step.kind != "submit" and self.pending_values:
+        if not review_group and step.kind != "submit" and self.pending_values:
             embed.add_field(
                 name="Pending selection",
                 value=_format_pending_selection(step, self.pending_values),
@@ -353,9 +365,10 @@ class PredictionEntryView(discord.ui.View):
         self.clear_items()
         if self.finished:
             return
+        review_group = self._review_group()
         step = next_prediction_step(self.session.model, self.session.data)
         progress = prediction_progress(self.session.model, self.session.data)
-        if step.kind != "submit":
+        if not review_group and step.kind != "submit":
             select = discord.ui.Select(
                 placeholder=step.title[:100],
                 min_values=step.min_values,
@@ -385,7 +398,23 @@ class PredictionEntryView(discord.ui.View):
         previous_button.callback = self._previous_callback
         self.add_item(previous_button)
 
-        if step.kind not in {"group_pick", "submit"}:
+        if review_group:
+            next_group_button = discord.ui.Button(
+                label="Next group" if step.kind == "group_pick" else "Next",
+                style=discord.ButtonStyle.primary,
+                row=1,
+            )
+            next_group_button.callback = self._next_group_callback
+            self.add_item(next_group_button)
+
+            reset_group_button = discord.ui.Button(
+                label="Reset group",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
+            reset_group_button.callback = self._reset_group_callback
+            self.add_item(reset_group_button)
+        elif step.kind not in {"group_pick", "submit"}:
             next_button = discord.ui.Button(
                 label="Next",
                 style=discord.ButtonStyle.primary,
@@ -395,20 +424,12 @@ class PredictionEntryView(discord.ui.View):
             next_button.callback = self._next_callback
             self.add_item(next_button)
 
-        restart_button = discord.ui.Button(
-            label="Start over",
-            style=discord.ButtonStyle.danger,
-            row=1,
-        )
-        restart_button.callback = self._restart_callback
-        self.add_item(restart_button)
-
         cancel_button = discord.ui.Button(
             label="Cancel",
             style=discord.ButtonStyle.secondary,
             row=1,
         )
-        cancel_button.callback = self._cancel_callback
+        cancel_button.callback = self._cancel_entry_callback
         self.add_item(cancel_button)
 
         if step.kind == "submit":
@@ -435,6 +456,31 @@ class PredictionEntryView(discord.ui.View):
             self.notice = str(exc)
         await self._edit(interaction)
 
+    async def _next_group_callback(self, interaction: discord.Interaction) -> None:
+        self.review_group_id = None
+        self.notice = None
+        await self._edit(interaction)
+
+    async def _reset_group_callback(self, interaction: discord.Interaction) -> None:
+        group = self._review_group()
+        if group is None:
+            self.notice = "There is no completed group to reset."
+            await self._edit(interaction)
+            return
+
+        try:
+            for _ in range(len(self._group_ranking(group.id))):
+                self.session.data = undo_last_prediction_step(
+                    self.session.model,
+                    self.session.data,
+                )
+            self.pending_values = []
+            self.review_group_id = None
+            self.notice = f"{group.label} reset. Rank it again."
+        except PredictionValidationError as exc:
+            self.notice = str(exc)
+        await self._edit(interaction)
+
     async def _next_callback(self, interaction: discord.Interaction) -> None:
         if not self.pending_values:
             self.notice = "Choose an option before moving forward."
@@ -451,6 +497,7 @@ class PredictionEntryView(discord.ui.View):
 
     async def _previous_callback(self, interaction: discord.Interaction) -> None:
         self.pending_values = []
+        self.review_group_id = None
         try:
             self.session.data = undo_last_prediction_step(
                 self.session.model,
@@ -461,14 +508,9 @@ class PredictionEntryView(discord.ui.View):
             self.notice = str(exc)
         await self._edit(interaction)
 
-    async def _restart_callback(self, interaction: discord.Interaction) -> None:
-        self.session.data = restart_prediction_data()
+    async def _cancel_entry_callback(self, interaction: discord.Interaction) -> None:
         self.pending_values = []
-        self.notice = "Prediction entry restarted. Nothing changes until you submit."
-        await self._edit(interaction)
-
-    async def _cancel_callback(self, interaction: discord.Interaction) -> None:
-        self.pending_values = []
+        self.review_group_id = None
         self.notice = "Prediction entry cancelled. No changes were submitted."
         self.finished = True
         self.clear_items()
@@ -495,11 +537,36 @@ class PredictionEntryView(discord.ui.View):
         if step.kind == "group_pick":
             self.session.data = self._apply_step(step, values)
             self.pending_values = []
-            self.notice = "Selection recorded."
+            if step.group_id and self._is_group_complete(step.group_id):
+                self.review_group_id = step.group_id
+                self.notice = "Group ranking complete."
+            else:
+                self.review_group_id = None
+                self.notice = "Selection recorded."
             return
 
+        self.review_group_id = None
         self.pending_values = values
         self.notice = "Selection ready. Press Next to record it."
+
+    def _review_group(self) -> Group | None:
+        if self.review_group_id is None:
+            return None
+        group = self.session.model.groups_by_id.get(self.review_group_id)
+        if group is None or not self._is_group_complete(group.id):
+            self.review_group_id = None
+            return None
+        return group
+
+    def _is_group_complete(self, group_id: str) -> bool:
+        return len(self._group_ranking(group_id)) >= len(
+            self.session.model.groups_by_id[group_id].team_ids
+        )
+
+    def _group_ranking(self, group_id: str) -> list[str]:
+        rankings = self.session.data.get("group_rankings", {})
+        ranking = rankings.get(group_id, []) if isinstance(rankings, dict) else []
+        return [str(team_id) for team_id in ranking]
 
     def _apply_step(self, step: PredictionStep, values: list[str]) -> dict[str, Any]:
         if step.kind == "group_pick":
