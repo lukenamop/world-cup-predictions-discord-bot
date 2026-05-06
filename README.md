@@ -1,6 +1,6 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 10 work from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, canonical 2026 World Cup tournament configuration, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images with flags, preferences, guided admin setup/configuration, operator sync, admin posting and reminders, exports, and backups.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 10 work from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, canonical 2026 World Cup tournament configuration, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images with flags, preferences, guided admin setup/configuration, operator sync, admin posting and reminders, exports, and backups. Milestone 11 release readiness is tracked with the local release check and staging checklist below.
 
 ## Current Command Surface
 
@@ -266,3 +266,84 @@ Migrations are plain numbered SQL files in `world_cup_bot/data/migrations`. They
 . .venv/bin/activate
 python -m unittest discover tests
 ```
+
+## Release Readiness
+
+Milestone 11 release checks should be run from a Python 3.12 virtualenv with
+dependencies installed and `.env` populated for the target environment. The
+repeatable local checks are:
+
+```bash
+. .venv/bin/activate
+python scripts/release_check.py
+```
+
+The release check runs the full unit suite, validates the canonical tournament
+file, loads `.env` for subprocesses, and runs the database health/migration
+smoke test. It exits non-zero if any check fails.
+
+For machines that do not have local PostgreSQL ready yet, run the non-database
+portion while setting up PostgreSQL manually as described above:
+
+```bash
+. .venv/bin/activate
+python scripts/release_check.py --skip-db
+```
+
+Before calling a release ready, also run the database-backed check against a
+local or staging PostgreSQL database:
+
+```bash
+. .venv/bin/activate
+python scripts/healthcheck.py
+```
+
+Confirm these startup and process behaviors before release:
+
+- Missing `DISCORD_TOKEN` or `DATABASE_URL` fails startup with a clear
+  configuration error.
+- A bad `DATABASE_URL` fails startup or health check clearly without logging
+  secrets.
+- Normal startup logs environment name, masked database target, guild count when
+  ready, and slash-command sync status.
+- `pm2 start ecosystem.config.js --env production` runs
+  `.venv/bin/python -m world_cup_bot.bot`, restarts with delay, and shows the
+  `world-cup-bot` process in `pm2 status`.
+
+### Discord Staging Checklist
+
+Use a staging Discord application and guild. Populate `.env` locally with
+`DISCORD_TOKEN`, `DATABASE_URL`, `OPERATOR_GUILD_ID`, and `OWNER_USER_IDS` as
+needed. Invite the bot with application command permissions, then start it:
+
+```bash
+. .venv/bin/activate
+set -a
+. .env
+set +a
+python -m world_cup_bot.bot
+```
+
+Run this manual flow in the staging guild and record any unexpected response:
+
+1. Run `/help` and confirm the bot responds.
+2. Run `/admin setup announcement_channel:#predictions leaderboard_channel:#leaderboard timezone_name:America/New_York lock_deadline_local:2026-06-11 12:00` and confirm the canonical 2026 tournament is attached.
+3. Run `/admin status` and verify setup, channels, provider, lock, and tournament status.
+4. Run `/admin config` with no options and verify configured scoring, timezone, privacy default, and lock mode.
+5. Run `/admin open`, then `/rules`, and verify prediction entry is open.
+6. Run `/admin post kind:rules`, `/admin post kind:status`, `/admin post kind:lock`, and `/admin post kind:reminder`; confirm posts land in the announcement channel.
+7. Run `/predict`, complete a full bracket, and confirm submission succeeds only after the final confirmation.
+8. Run `/prediction`, `/groups`, and `/bracket` for yourself; confirm concise embeds appear with image attachments for the image commands.
+9. Run `/edit`, change at least one submitted pick, complete the flow, and confirm the previous submission remains active until final confirmation.
+10. Run `/preferences share_full_bracket:True`; from another test user, run `/groups user:<submitter>` and `/bracket user:<submitter>` and confirm shared views are visible.
+11. Run `/leaderboard`, `/rank`, and `/points`; before official results, confirm empty or pending states are clear.
+12. Run `/operator sync` in the configured operator guild and verify it completes or reports provider availability clearly.
+13. Run `/admin recalc` and confirm it is idempotent when repeated.
+14. Run `/admin post kind:leaderboard` and confirm it posts to the leaderboard channel.
+15. Run `/admin export` and `/admin backup`; confirm each returns an ephemeral JSON attachment and writes an audit row.
+16. Run `/admin lock deadline_utc:2026-05-01T00:00:00Z`; confirm `/predict` or `/edit` is blocked by lock behavior.
+17. Run `/admin close`; confirm prediction entry is closed without changing the configured lock deadline.
+18. Restart the bot and confirm it reconnects, reapplies no duplicate migrations, logs ready state, and preserves guild setup and submitted prediction data.
+
+Keep staging credentials and exported JSON attachments out of git. Do not commit
+`.env`, production data, provider secrets, PM2 dumps, or database exports.
