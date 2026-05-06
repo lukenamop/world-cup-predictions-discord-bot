@@ -63,7 +63,7 @@ Expected setup flow:
 5. Admin opens predictions.
 
 The prediction announcement channel is the default public destination for
-prediction-related league notices such as rules, lock notices, reminders, and
+prediction-related league info such as rules, lock deadline, reminders, and
 open/closed status. It is not used for private
 prediction entry; `/predict` and `/edit` remain private user flows. Live results
 provider selection is operator-level for now through `LIVE_RESULTS_PROVIDER`, not
@@ -195,7 +195,7 @@ Admin commands:
 - `/admin close`: closes prediction entry without changing the configured lock deadline.
 - `/admin lock`: sets, views, or forces prediction locks.
 - `/admin recalc`: recalculates scores and leaderboard totals.
-- `/admin post`: posts leaderboard, rules, or lock snapshots to configured channels. Lock posts include reminder copy and prediction commands.
+- `/admin post`: posts leaderboard or info snapshots to configured channels. Info posts include rules, lock deadline, reminder copy, and prediction commands.
 - `/admin export`: exports tournament, prediction, scoring, or leaderboard data.
 - `/admin backup`: creates an operator-friendly backup of bot configuration and database state.
 

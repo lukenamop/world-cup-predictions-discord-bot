@@ -190,7 +190,7 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         self.assertEqual(rules["champion"], 30)
         self.assertEqual(rules["runner_up"], 15)
 
-    def test_lock_embed_includes_deadline_and_prediction_commands(self) -> None:
+    def test_prediction_info_embed_includes_deadline_and_prediction_commands(self) -> None:
         admin_module = _load_admin_module_with_fake_discord()
         settings = types.SimpleNamespace(
             predictions_open=True,
@@ -199,9 +199,12 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         )
         tournament = types.SimpleNamespace(tournament_name="Test Cup")
 
-        embed = admin_module._lock_embed(settings=settings, tournament=tournament)
+        embed = admin_module._prediction_info_embed(
+            settings=settings,
+            tournament=tournament,
+        )
 
-        self.assertEqual(embed.title, "Prediction Lock")
+        self.assertEqual(embed.title, "Prediction Info")
         self.assertIn("predictions are open", embed.description)
         self.assertIn("/predict", _field_value(embed, "Commands"))
         self.assertIn("<t:1781200800:F>", _field_value(embed, "Deadline"))
@@ -251,7 +254,7 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         self.assertEqual(
             _field_value(embed, "Next steps"),
             "When the league is ready, run `/admin open`. Then run "
-            "`/admin post kind: rules`, and `/admin post kind: lock`.",
+            "`/admin post kind:info`.",
         )
         self.assertIsNone(embed.footer)
         self.assertNotIn("Live provider", [field.name for field in embed.fields])
@@ -340,7 +343,30 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             "Champion +25, runner-up +15, third-place +10",
         )
 
-    def test_lock_embed_includes_public_tournament_context(self) -> None:
+    def test_info_embeds_combine_prediction_info_and_rules(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+        settings = admin_module.GuildSettings(
+            guild_id="guild-1",
+            announcement_channel_id="111",
+            leaderboard_channel_id="222",
+            timezone="America/Chicago",
+            live_results_provider="fifa_public_calendar",
+            lock_deadline_utc=datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc),
+            predictions_open=True,
+            scoring_rules=admin_module._default_scoring_rules(),
+            privacy_defaults={"share_full_bracket": False},
+            lock_mode=admin_module.LOCK_MODE,
+        )
+        tournament = types.SimpleNamespace(tournament_name="FIFA World Cup 2026")
+
+        embeds = admin_module._info_embeds(settings=settings, tournament=tournament)
+
+        self.assertEqual(
+            [embed.title for embed in embeds],
+            ["Prediction Info", "League Rules"],
+        )
+
+    def test_prediction_info_embed_includes_public_tournament_context(self) -> None:
         admin_module = _load_admin_module_with_fake_discord()
         settings = types.SimpleNamespace(
             predictions_open=True,
@@ -348,9 +374,12 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         )
         tournament = types.SimpleNamespace(tournament_name="FIFA World Cup 2026")
 
-        embed = admin_module._lock_embed(settings=settings, tournament=tournament)
+        embed = admin_module._prediction_info_embed(
+            settings=settings,
+            tournament=tournament,
+        )
 
-        self.assertEqual(embed.title, "Prediction Lock")
+        self.assertEqual(embed.title, "Prediction Info")
         self.assertIn("Submit or edit your bracket", embed.description)
         self.assertEqual(_field_value(embed, "Tournament"), "FIFA World Cup 2026")
         self.assertEqual(_field_value(embed, "Status"), "Open")

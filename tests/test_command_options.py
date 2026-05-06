@@ -85,7 +85,7 @@ class CommandOptionMetadataTests(unittest.TestCase):
 
         choices = _option_choices(post_command, "kind")
 
-        self.assertEqual(choices, ["leaderboard", "rules", "lock"])
+        self.assertEqual(choices, ["leaderboard", "info"])
 
 
 def _command_functions(tree: ast.AST) -> list[ast.AsyncFunctionDef]:

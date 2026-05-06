@@ -31,9 +31,9 @@ from world_cup_bot.ui.discord_formatting import discord_datetime
 
 DEFAULT_PRIVACY_DEFAULTS = {"share_full_bracket": False}
 LOCK_MODE = "full_bracket_lock"
-POST_KIND_CHOICES = ["leaderboard", "rules", "lock"]
+POST_KIND_CHOICES = ["leaderboard", "info"]
 POST_KIND_SET = set(POST_KIND_CHOICES)
-LOCK_POST_NEXT_STEP = "Post the public notice with `/admin post kind: lock`."
+INFO_POST_NEXT_STEP = "Post public league info with `/admin post kind:info`."
 
 
 @dataclass(frozen=True)
@@ -559,7 +559,7 @@ class AdminCog(commands.Cog):
                 "Prediction entry is open. "
                 "Lock deadline: "
                 f"{_format_lock_deadline(settings.lock_deadline_utc, tournament=tournament)}. "
-                f"{LOCK_POST_NEXT_STEP}"
+                f"{INFO_POST_NEXT_STEP}"
             ),
             ephemeral=True,
         )
@@ -584,7 +584,7 @@ class AdminCog(commands.Cog):
         await ctx.respond(
             (
                 "Prediction entry is closed. "
-                f"{LOCK_POST_NEXT_STEP}"
+                f"{INFO_POST_NEXT_STEP}"
             ),
             ephemeral=True,
         )
@@ -657,7 +657,7 @@ class AdminCog(commands.Cog):
         await ctx.respond(
             "Prediction lock deadline: "
             f"{_format_lock_deadline(settings.lock_deadline_utc, tournament=tournament)}. "
-            f"{LOCK_POST_NEXT_STEP}",
+            f"{INFO_POST_NEXT_STEP}",
             ephemeral=True,
         )
 
@@ -701,7 +701,7 @@ class AdminCog(commands.Cog):
         "kind",
         str,
         description="Snapshot type to post.",
-        choices=["leaderboard", "rules", "lock"],
+        choices=["leaderboard", "info"],
     )
     @discord.option(
         "channel",
@@ -730,7 +730,7 @@ class AdminCog(commands.Cog):
         normalized = kind.strip().lower()
         if normalized not in POST_KIND_SET:
             await ctx.respond(
-                "Post kind must be one of: leaderboard, rules, lock.",
+                "Post kind must be one of: leaderboard, info.",
                 ephemeral=True,
             )
             return
@@ -752,12 +752,12 @@ class AdminCog(commands.Cog):
             return
 
         try:
-            embed = await self._announcement_embed(guild_id, normalized)
+            embeds = await self._announcement_embeds(guild_id, normalized)
         except (LeaderboardServiceError, ValueError) as exc:
             await ctx.respond(str(exc), ephemeral=True)
             return
 
-        await destination.send(embed=embed)
+        await destination.send(embeds=list(embeds))
         await AuditLogRepository(self.bot.database.pool).insert(
             guild_id=guild_id,
             actor_user_id=str(ctx.author.id),
@@ -823,7 +823,11 @@ class AdminCog(commands.Cog):
             ephemeral=True,
         )
 
-    async def _announcement_embed(self, guild_id: str, kind: str) -> discord.Embed:
+    async def _announcement_embeds(
+        self,
+        guild_id: str,
+        kind: str,
+    ) -> tuple[discord.Embed, ...]:
         if kind == "leaderboard":
             from world_cup_bot.cogs.leaderboard import leaderboard_embed
 
@@ -833,17 +837,15 @@ class AdminCog(commands.Cog):
             )
             if not scores:
                 raise ValueError("No leaderboard scores are available yet.")
-            return leaderboard_embed(scores)
+            return (leaderboard_embed(scores),)
 
         settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
         tournament = await TournamentConfigRepository(
             self.bot.database.pool
         ).get_active_config(guild_id)
-        if kind == "rules":
-            return _rules_embed(settings=settings, tournament=tournament)
-        if kind == "lock":
-            return _lock_embed(settings=settings, tournament=tournament)
-        raise ValueError("Post kind must be one of: leaderboard, rules, lock.")
+        if kind == "info":
+            return _info_embeds(settings=settings, tournament=tournament)
+        raise ValueError("Post kind must be one of: leaderboard, info.")
 
     async def _ensure_admin(self, ctx: discord.ApplicationContext) -> bool:
         if ctx.guild is None:
@@ -1128,7 +1130,7 @@ def _setup_embed(
         name="Next steps",
         value=(
             "When the league is ready, run `/admin open`. Then run "
-            "`/admin post kind: rules`, and `/admin post kind: lock`."
+            "`/admin post kind:info`."
         ),
         inline=False,
     )
@@ -1321,10 +1323,25 @@ def _rules_embed(*, settings: object, tournament: object) -> discord.Embed:
     return embed
 
 
-def _lock_embed(*, settings: object, tournament: object | None = None) -> discord.Embed:
+def _info_embeds(
+    *,
+    settings: object,
+    tournament: object | None,
+) -> tuple[discord.Embed, ...]:
+    return (
+        _prediction_info_embed(settings=settings, tournament=tournament),
+        _rules_embed(settings=settings, tournament=tournament),
+    )
+
+
+def _prediction_info_embed(
+    *,
+    settings: object,
+    tournament: object | None = None,
+) -> discord.Embed:
     predictions_open = bool(settings and settings.predictions_open)
     embed = discord.Embed(
-        title="Prediction Lock",
+        title="Prediction Info",
         description=(
             "World Cup predictions are open. Submit or edit your bracket before the lock."
             if predictions_open
