@@ -38,8 +38,9 @@ class FoundationCog(commands.Cog):
                 "`/predict`, `/edit`, `/prediction`, `/groups`, `/bracket`, "
                 "`/preferences`, `/leaderboard`, `/rank`, `/points`, `/rules`, "
                 "`/admin setup`, `/admin config`, `/admin status`, "
-                "`/admin open`, `/admin close`, `/admin lock`, `/admin recalc`, `/admin post`, "
-                "`/admin export`, `/admin backup`"
+                "`/admin open`, `/admin close`, `/admin lock`, `/admin recalc`, "
+                "`/admin post info`, `/admin post leaderboard`, `/admin export`, "
+                "`/admin backup`"
             ),
             inline=False,
         )

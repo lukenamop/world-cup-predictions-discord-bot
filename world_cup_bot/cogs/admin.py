@@ -31,9 +31,7 @@ from world_cup_bot.ui.discord_formatting import discord_datetime
 
 DEFAULT_PRIVACY_DEFAULTS = {"share_full_bracket": False}
 LOCK_MODE = "full_bracket_lock"
-POST_KIND_CHOICES = ["leaderboard", "info"]
-POST_KIND_SET = set(POST_KIND_CHOICES)
-INFO_POST_NEXT_STEP = "Post public league info with `/admin post kind:info`."
+INFO_POST_NEXT_STEP = "Post public league info with `/admin post info`."
 
 
 @dataclass(frozen=True)
@@ -50,6 +48,7 @@ class AdminCog(commands.Cog):
         "Admin league setup commands.",
         default_member_permissions=discord.Permissions(manage_guild=True),
     )
+    post = admin.create_subgroup("post", "Post league announcement snapshots.")
 
     def __init__(self, bot: discord.Bot) -> None:
         self.bot = bot
@@ -696,78 +695,41 @@ class AdminCog(commands.Cog):
             ephemeral=True,
         )
 
-    @admin.command(name="post", description="Post a league announcement snapshot.")
-    @discord.option(
-        "kind",
-        str,
-        description="Snapshot type to post.",
-        choices=["leaderboard", "info"],
-    )
+    @post.command(name="info", description="Post league info and rules.")
     @discord.option(
         "channel",
         discord.TextChannel,
         description="Text channel to post to instead of the configured default.",
         required=False,
     )
-    async def post_command(
+    async def post_info_command(
         self,
         ctx: discord.ApplicationContext,
-        kind: discord.Option(
-            str,
-            "Snapshot type to post.",
-            choices=POST_KIND_CHOICES,
-        ) = "leaderboard",
         channel: discord.Option(
             discord.TextChannel,
             "Text channel to post to instead of the configured default.",
             required=False,
         ) = None,
     ) -> None:
-        if not await self._ensure_admin(ctx):
-            return
+        await self._post_announcement(ctx, kind="info", channel=channel)
 
-        guild_id = _guild_id(ctx)
-        normalized = kind.strip().lower()
-        if normalized not in POST_KIND_SET:
-            await ctx.respond(
-                "Post kind must be one of: leaderboard, info.",
-                ephemeral=True,
-            )
-            return
-
-        settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
-        destination = channel or _configured_post_channel(
-            ctx=ctx,
-            settings=settings,
-            kind=normalized,
-        )
-        if destination is None or not hasattr(destination, "send"):
-            await ctx.respond(
-                (
-                    "No configured channel is available for that post. "
-                    "Run `/admin setup` or pass `channel:` explicitly."
-                ),
-                ephemeral=True,
-            )
-            return
-
-        try:
-            embeds = await self._announcement_embeds(guild_id, normalized)
-        except (LeaderboardServiceError, ValueError) as exc:
-            await ctx.respond(str(exc), ephemeral=True)
-            return
-
-        await destination.send(embeds=list(embeds))
-        await AuditLogRepository(self.bot.database.pool).insert(
-            guild_id=guild_id,
-            actor_user_id=str(ctx.author.id),
-            action="announcement_posted",
-            details={
-                "kind": normalized,
-                "channel_id": str(getattr(destination, "id", "")),
-            },
-        )
-        await ctx.respond(f"Posted `{normalized}` to {destination.mention}.", ephemeral=True)
+    @post.command(name="leaderboard", description="Post the current leaderboard.")
+    @discord.option(
+        "channel",
+        discord.TextChannel,
+        description="Text channel to post to instead of the configured default.",
+        required=False,
+    )
+    async def post_leaderboard_command(
+        self,
+        ctx: discord.ApplicationContext,
+        channel: discord.Option(
+            discord.TextChannel,
+            "Text channel to post to instead of the configured default.",
+            required=False,
+        ) = None,
+    ) -> None:
+        await self._post_announcement(ctx, kind="leaderboard", channel=channel)
 
     @admin.command(name="export", description="Export submitted predictions as JSON.")
     async def export_command(self, ctx: discord.ApplicationContext) -> None:
@@ -845,7 +807,52 @@ class AdminCog(commands.Cog):
         ).get_active_config(guild_id)
         if kind == "info":
             return _info_embeds(settings=settings, tournament=tournament)
-        raise ValueError("Post kind must be one of: leaderboard, info.")
+        raise ValueError("Post command must be `info` or `leaderboard`.")
+
+    async def _post_announcement(
+        self,
+        ctx: discord.ApplicationContext,
+        *,
+        kind: str,
+        channel: discord.TextChannel | None,
+    ) -> None:
+        if not await self._ensure_admin(ctx):
+            return
+
+        guild_id = _guild_id(ctx)
+        settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
+        destination = channel or _configured_post_channel(
+            ctx=ctx,
+            settings=settings,
+            kind=kind,
+        )
+        if destination is None or not hasattr(destination, "send"):
+            await ctx.respond(
+                (
+                    "No configured channel is available for that post. "
+                    "Run `/admin setup` or pass `channel:` explicitly."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        try:
+            embeds = await self._announcement_embeds(guild_id, kind)
+        except (LeaderboardServiceError, ValueError) as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        await destination.send(embeds=list(embeds))
+        await AuditLogRepository(self.bot.database.pool).insert(
+            guild_id=guild_id,
+            actor_user_id=str(ctx.author.id),
+            action="announcement_posted",
+            details={
+                "kind": kind,
+                "channel_id": str(getattr(destination, "id", "")),
+            },
+        )
+        await ctx.respond(f"Posted `{kind}` to {destination.mention}.", ephemeral=True)
 
     async def _ensure_admin(self, ctx: discord.ApplicationContext) -> bool:
         if ctx.guild is None:
@@ -1130,7 +1137,7 @@ def _setup_embed(
         name="Next steps",
         value=(
             "When the league is ready, run `/admin open`. Then run "
-            "`/admin post kind:info`."
+            "`/admin post info`."
         ),
         inline=False,
     )

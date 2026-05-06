@@ -254,7 +254,7 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         self.assertEqual(
             _field_value(embed, "Next steps"),
             "When the league is ready, run `/admin open`. Then run "
-            "`/admin post kind:info`.",
+            "`/admin post info`.",
         )
         self.assertIsNone(embed.footer)
         self.assertNotIn("Live provider", [field.name for field in embed.fields])
@@ -588,6 +588,14 @@ class _FakeSlashCommandGroup:
             return func
 
         return decorator
+
+    def create_subgroup(
+        self,
+        name: str,
+        description: str | None = None,
+        **_: object,
+    ) -> "_FakeSlashCommandGroup":
+        return _FakeSlashCommandGroup(name, description or "No description provided")
 
 
 class _FakeBot:

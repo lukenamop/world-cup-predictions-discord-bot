@@ -77,15 +77,15 @@ class CommandOptionMetadataTests(unittest.TestCase):
                         f"{path.name}:{function.name}.{argument.arg} should use {expected_type}.",
                     )
 
-    def test_admin_post_choices_keep_status_private(self) -> None:
+    def test_admin_post_uses_named_subcommands(self) -> None:
         tree = ast.parse(
             (PROJECT_ROOT / "world_cup_bot" / "cogs" / "admin.py").read_text()
         )
-        post_command = _function_by_name(tree, "post_command")
+        command_names = {function.name for function in _command_functions(tree)}
 
-        choices = _option_choices(post_command, "kind")
-
-        self.assertEqual(choices, ["leaderboard", "info"])
+        self.assertIn("post_info_command", command_names)
+        self.assertIn("post_leaderboard_command", command_names)
+        self.assertNotIn("post_command", command_names)
 
 
 def _command_functions(tree: ast.AST) -> list[ast.AsyncFunctionDef]:
