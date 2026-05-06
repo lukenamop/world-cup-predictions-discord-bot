@@ -15,8 +15,8 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/rank [user]` shows a user's current shared rank and point totals after scores have been recalculated.
 - `/points [user]` shows a user's group/knockout point breakdown after scores have been recalculated.
 - `/rules` shows scoring and lock behavior.
-- `/admin setup <announcement_channel> <leaderboard_channel> [timezone_name] [share_full_bracket_default] [lock_deadline_local]` configures the server's prediction announcement channel, leaderboard channel, timezone, privacy default, default scoring, optional lock deadline, and canonical 2026 World Cup tournament data.
-- `/admin config [...]` views or updates configured channels, timezone, privacy default, lock deadline, and scoring values after setup.
+- `/admin setup <announcement_channel> <leaderboard_channel> [share_full_bracket_default] [lock_deadline_utc]` configures the server's prediction announcement channel, leaderboard channel, privacy default, default scoring, optional UTC lock deadline, and canonical 2026 World Cup tournament data.
+- `/admin config [...]` views or updates configured channels, privacy default, UTC lock deadline, and scoring values after setup.
 - `/admin status` shows setup status for the current server, including active tournament data.
 - `/admin open` opens prediction entry.
 - `/admin close` closes prediction entry without changing the lock deadline.
@@ -207,21 +207,20 @@ Tie-breaker adjudications are stored by tournament ID and config hash, then audi
 Run setup from the server where the league will live:
 
 ```text
-/admin setup announcement_channel:#world-cup leaderboard_channel:#leaderboard timezone_name:America/New_York lock_deadline_local:2026-06-11 12:00
+/admin setup announcement_channel:#world-cup leaderboard_channel:#leaderboard lock_deadline_utc:2026-06-11T18:00:00Z
 ```
 
 The prediction announcement channel is used for public league notices such as rules, lock reminders, prediction open/closed status, and status snapshots. Private prediction entry still happens through ephemeral `/predict` and `/edit` flows.
 
 `announcement_channel` and `leaderboard_channel` are required text-channel
-inputs. Use `/admin config clear_lock_deadline:True` or `/admin lock clear:True`
-to clear a configured deadline after setup.
-
-Timezone values must be IANA names such as `America/New_York`, `America/Chicago`, `America/Denver`, `America/Los_Angeles`, or `UTC`. `lock_deadline_local` is interpreted in the configured server timezone and stored in UTC.
+inputs. `lock_deadline_utc` must be an ISO-8601 UTC timestamp such as
+`2026-06-11T18:00:00Z`. Use `/admin config clear_lock_deadline:True` or
+`/admin lock clear:True` to clear a configured deadline after setup.
 
 Use `/admin config` with no options to view current settings. Pass only the options you want to change, for example:
 
 ```text
-/admin config timezone_name:America/Chicago
+/admin config lock_deadline_utc:2026-06-11T18:00:00Z
 /admin config share_full_bracket_default:False
 /admin config champion:30 runner_up:20
 ```
@@ -331,9 +330,9 @@ python -m world_cup_bot.bot
 Run this manual flow in the staging guild and record any unexpected response:
 
 1. Run `/help` and confirm the bot responds.
-2. Run `/admin setup announcement_channel:#predictions leaderboard_channel:#leaderboard timezone_name:America/New_York lock_deadline_local:2026-06-11 12:00` and confirm the canonical 2026 tournament is attached.
-3. Run `/admin status` and verify setup, channels, provider, lock, and tournament status.
-4. Run `/admin config` with no options and verify configured scoring, timezone, privacy default, and lock mode.
+2. Run `/admin setup announcement_channel:#predictions leaderboard_channel:#leaderboard lock_deadline_utc:2026-06-11T18:00:00Z` and confirm the canonical 2026 tournament is attached.
+3. Run `/admin status` and verify setup, channels, lock, and tournament status.
+4. Run `/admin config` with no options and verify configured scoring, privacy default, and lock behavior.
 5. Run `/admin open`, then `/rules`, and verify prediction entry is open.
 6. Run `/admin post kind:rules`, `/admin post kind:status`, `/admin post kind:lock`, and `/admin post kind:reminder`; confirm posts land in the announcement channel.
 7. Run `/predict`, complete a full bracket, and confirm submission succeeds only after the final confirmation.

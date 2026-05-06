@@ -189,8 +189,8 @@ Public/user commands:
 
 Admin commands:
 
-- `/admin setup`: configures prediction announcement channel, leaderboard channel, timezone, initial settings, and canonical 2026 World Cup tournament data.
-- `/admin config`: views or updates scoring, privacy defaults, lock mode, timezone, and configured channels.
+- `/admin setup`: configures prediction announcement channel, leaderboard channel, initial settings, optional UTC lock deadline, and canonical 2026 World Cup tournament data.
+- `/admin config`: views or updates scoring, privacy defaults, lock mode, UTC lock deadline, and configured channels.
 - `/admin open`: opens prediction entry.
 - `/admin close`: closes prediction entry without changing the configured lock deadline.
 - `/admin lock`: sets, views, or forces prediction locks.
@@ -294,9 +294,9 @@ Visual design:
 ### 7. Admin Setup And Guild Configuration
 
 - Add `/admin setup` for prediction announcement channel, leaderboard channel,
-  timezone, initial privacy defaults, scoring defaults, and lock deadline.
+  initial privacy defaults, scoring defaults, and optional UTC lock deadline.
 - Add `/admin config` to view and update scoring rules, privacy defaults, lock
-  mode, timezone, and configured channels after setup.
+  mode, UTC lock deadline, and configured channels after setup.
 - Make `/admin post` use configured channels by default while still allowing an
   explicit channel override.
 - Audit every admin change that mutates setup, scoring, privacy, lock,

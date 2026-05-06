@@ -10,6 +10,7 @@ from world_cup_bot.services.leaderboard_service import (
     RankedScore,
     leaderboard_row_text,
 )
+from world_cup_bot.ui.discord_formatting import discord_datetime, discord_timestamp
 
 PAGE_SIZE = 10
 
@@ -208,18 +209,19 @@ def leaderboard_embed(
     safe_page = min(max(1, page), page_count)
     start = (safe_page - 1) * PAGE_SIZE
     rows = ranked_scores[start : start + PAGE_SIZE]
+    latest = max((ranked.score.recalculated_at for ranked in ranked_scores), default=None)
+    description = f"Page {safe_page}/{page_count}"
+    if latest is not None:
+        description = f"{description}\nLast updated {discord_timestamp(latest, 'R')}"
     embed = discord.Embed(
         title="Leaderboard",
-        description=f"Page {safe_page}/{page_count}",
+        description=description,
         color=discord.Color.gold(),
     )
     lines = []
     for ranked in rows:
         lines.append(leaderboard_row_text(ranked))
     embed.add_field(name="Rankings", value="\n".join(lines)[:1024], inline=False)
-    latest = max((ranked.score.recalculated_at for ranked in ranked_scores), default=None)
-    if latest is not None:
-        embed.set_footer(text=f"Last updated {latest:%Y-%m-%d %H:%M UTC}")
     return embed
 
 
@@ -235,7 +237,7 @@ def _rank_embed(ranked: RankedScore) -> discord.Embed:
     embed.add_field(name="Knockout", value=str(score.knockout_points), inline=True)
     embed.add_field(
         name="Updated",
-        value=f"{score.recalculated_at:%Y-%m-%d %H:%M UTC}",
+        value=discord_datetime(score.recalculated_at),
         inline=False,
     )
     return embed

@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Mapping
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
 from discord.ext import commands
@@ -27,6 +26,7 @@ from world_cup_bot.services.tournament_import import (
     TournamentImportError,
     load_tournament_config,
 )
+from world_cup_bot.ui.discord_formatting import discord_datetime
 
 
 DEFAULT_PRIVACY_DEFAULTS = {"share_full_bracket": False}
@@ -53,7 +53,7 @@ class AdminCog(commands.Cog):
 
     @admin.command(
         name="setup",
-        description="Configure this server's league channels, timezone, privacy, scoring, and lock.",
+        description="Configure this server's league channels, privacy, scoring, and lock.",
     )
     @discord.option(
         "announcement_channel",
@@ -66,21 +66,15 @@ class AdminCog(commands.Cog):
         description="Text channel for leaderboard posts.",
     )
     @discord.option(
-        "timezone_name",
-        str,
-        description="IANA timezone for local deadlines, such as America/New_York.",
-        required=False,
-    )
-    @discord.option(
         "share_full_bracket_default",
         bool,
         description="Default full-bracket sharing preference for new users.",
         required=False,
     )
     @discord.option(
-        "lock_deadline_local",
+        "lock_deadline_utc",
         str,
-        description="Local lock deadline like 2026-06-11 12:00.",
+        description="UTC lock deadline like 2026-06-11T18:00:00Z.",
         required=False,
     )
     async def setup_command(
@@ -94,19 +88,14 @@ class AdminCog(commands.Cog):
             discord.TextChannel,
             "Text channel for leaderboard posts.",
         ),
-        timezone_name: discord.Option(
-            str,
-            "IANA timezone for local deadlines, such as America/New_York.",
-            required=False,
-        ) = None,
         share_full_bracket_default: discord.Option(
             bool,
             "Default full-bracket sharing preference for new users.",
             required=False,
         ) = None,
-        lock_deadline_local: discord.Option(
+        lock_deadline_utc: discord.Option(
             str,
-            "Local lock deadline like 2026-06-11 12:00.",
+            "UTC lock deadline like 2026-06-11T18:00:00Z.",
             required=False,
         ) = None,
     ) -> None:
@@ -116,13 +105,12 @@ class AdminCog(commands.Cog):
         guild_id = _guild_id(ctx)
         existing = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
         try:
-            configured_timezone = _validate_timezone_name(
-                timezone_name or (existing.timezone if existing else self.bot.settings.default_timezone)
+            configured_timezone = (
+                existing.timezone if existing else self.bot.settings.default_timezone
             )
             lock_deadline_utc = _resolve_lock_deadline(
                 existing=existing,
-                timezone_name=configured_timezone,
-                lock_deadline_local=lock_deadline_local,
+                lock_deadline_utc=lock_deadline_utc,
                 clear_lock_deadline=False,
             )
         except ValueError as exc:
@@ -137,7 +125,11 @@ class AdminCog(commands.Cog):
             live_results_provider=self.bot.settings.live_results_provider,
             lock_deadline_utc=lock_deadline_utc,
             predictions_open=existing.predictions_open if existing else False,
-            scoring_rules=existing.scoring_rules if existing and existing.scoring_rules else _default_scoring_rules(),
+            scoring_rules=(
+                existing.scoring_rules
+                if existing and existing.scoring_rules
+                else _default_scoring_rules()
+            ),
             privacy_defaults={
                 "share_full_bracket": (
                     bool(share_full_bracket_default)
@@ -195,21 +187,15 @@ class AdminCog(commands.Cog):
         required=False,
     )
     @discord.option(
-        "timezone_name",
-        str,
-        description="IANA timezone for local deadlines, such as America/New_York.",
-        required=False,
-    )
-    @discord.option(
         "share_full_bracket_default",
         bool,
         description="Default full-bracket sharing preference for new users.",
         required=False,
     )
     @discord.option(
-        "lock_deadline_local",
+        "lock_deadline_utc",
         str,
-        description="Local lock deadline like 2026-06-11 12:00.",
+        description="UTC lock deadline like 2026-06-11T18:00:00Z.",
         required=False,
     )
     @discord.option(
@@ -312,19 +298,14 @@ class AdminCog(commands.Cog):
             "Text channel for leaderboard posts.",
             required=False,
         ) = None,
-        timezone_name: discord.Option(
-            str,
-            "IANA timezone for local deadlines, such as America/New_York.",
-            required=False,
-        ) = None,
         share_full_bracket_default: discord.Option(
             bool,
             "Default full-bracket sharing preference for new users.",
             required=False,
         ) = None,
-        lock_deadline_local: discord.Option(
+        lock_deadline_utc: discord.Option(
             str,
-            "Local lock deadline like 2026-06-11 12:00.",
+            "UTC lock deadline like 2026-06-11T18:00:00Z.",
             required=False,
         ) = None,
         clear_lock_deadline: discord.Option(
@@ -423,9 +404,8 @@ class AdminCog(commands.Cog):
         has_updates = _config_has_updates(
             announcement_channel=announcement_channel,
             leaderboard_channel=leaderboard_channel,
-            timezone_name=timezone_name,
             share_full_bracket_default=share_full_bracket_default,
-            lock_deadline_local=lock_deadline_local,
+            lock_deadline_utc=lock_deadline_utc,
             clear_lock_deadline=clear_lock_deadline,
             use_default_scoring=use_default_scoring,
             scoring_values=scoring_values,
@@ -438,10 +418,14 @@ class AdminCog(commands.Cog):
             return
 
         if existing is not None and not has_updates:
+            tournament = await TournamentConfigRepository(
+                self.bot.database.pool
+            ).get_active_config(guild_id)
             await ctx.respond(
                 embed=_setup_embed(
                     settings=existing,
                     title="Prediction league configuration",
+                    tournament=tournament,
                 ),
                 ephemeral=True,
             )
@@ -453,11 +437,10 @@ class AdminCog(commands.Cog):
             live_provider=self.bot.settings.live_results_provider,
         )
         try:
-            configured_timezone = _validate_timezone_name(timezone_name or baseline.timezone)
+            configured_timezone = baseline.timezone
             lock_deadline_utc = _resolve_lock_deadline(
                 existing=baseline,
-                timezone_name=configured_timezone,
-                lock_deadline_local=lock_deadline_local,
+                lock_deadline_utc=lock_deadline_utc,
                 clear_lock_deadline=clear_lock_deadline,
             )
             scoring_rules = _updated_scoring_rules(
@@ -481,8 +464,12 @@ class AdminCog(commands.Cog):
 
         settings = GuildSettings(
             guild_id=guild_id,
-            announcement_channel_id=_channel_id(announcement_channel) or baseline.announcement_channel_id,
-            leaderboard_channel_id=_channel_id(leaderboard_channel) or baseline.leaderboard_channel_id,
+            announcement_channel_id=(
+                _channel_id(announcement_channel) or baseline.announcement_channel_id
+            ),
+            leaderboard_channel_id=(
+                _channel_id(leaderboard_channel) or baseline.leaderboard_channel_id
+            ),
             timezone=configured_timezone,
             live_results_provider=self.bot.settings.live_results_provider,
             lock_deadline_utc=lock_deadline_utc,
@@ -531,15 +518,14 @@ class AdminCog(commands.Cog):
 
         guild_id = _guild_id(ctx)
         settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
-        tournament = await TournamentConfigRepository(self.bot.database.pool).get_active(
-            guild_id
-        )
+        tournament = await TournamentConfigRepository(
+            self.bot.database.pool
+        ).get_active_config(guild_id)
 
         await ctx.respond(
             embed=_status_embed(
                 settings=settings,
                 tournament=tournament,
-                default_timezone=self.bot.settings.default_timezone,
                 command_sync_status=self.bot.command_sync_status,
             ),
             ephemeral=True,
@@ -562,10 +548,14 @@ class AdminCog(commands.Cog):
             action="predictions_opened",
             details={"predictions_open": True},
         )
+        tournament = await TournamentConfigRepository(
+            self.bot.database.pool
+        ).get_active_config(guild_id)
         await ctx.respond(
             (
                 "Prediction entry is open. "
-                f"Lock deadline: {_format_lock_deadline(settings.lock_deadline_utc)}."
+                "Lock deadline: "
+                f"{_format_lock_deadline(settings.lock_deadline_utc, tournament=tournament)}."
             ),
             ephemeral=True,
         )
@@ -651,8 +641,12 @@ class AdminCog(commands.Cog):
                 )
             },
         )
+        tournament = await TournamentConfigRepository(
+            self.bot.database.pool
+        ).get_active_config(guild_id)
         await ctx.respond(
-            f"Prediction lock deadline: {_format_lock_deadline(settings.lock_deadline_utc)}.",
+            "Prediction lock deadline: "
+            f"{_format_lock_deadline(settings.lock_deadline_utc, tournament=tournament)}.",
             ephemeral=True,
         )
 
@@ -831,20 +825,19 @@ class AdminCog(commands.Cog):
             return leaderboard_embed(scores)
 
         settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
-        tournament = await TournamentConfigRepository(self.bot.database.pool).get_active(
-            guild_id
-        )
+        tournament = await TournamentConfigRepository(
+            self.bot.database.pool
+        ).get_active_config(guild_id)
         if kind == "rules":
             return _rules_embed(settings=settings, tournament=tournament)
         if kind == "lock":
-            return _lock_embed(settings=settings)
+            return _lock_embed(settings=settings, tournament=tournament)
         if kind == "reminder":
             return _reminder_embed(settings=settings, tournament=tournament)
         if kind == "status":
             return _status_embed(
                 settings=settings,
                 tournament=tournament,
-                default_timezone=self.bot.settings.default_timezone,
                 command_sync_status=self.bot.command_sync_status,
             )
         raise ValueError("Post kind must be one of: leaderboard, rules, lock, status, reminder.")
@@ -922,50 +915,17 @@ def _default_scoring_rules() -> dict[str, int]:
     return asdict(ScoringRules())
 
 
-def _validate_timezone_name(value: str) -> str:
-    timezone_name = value.strip()
-    try:
-        ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError as exc:
-        raise ValueError(
-            "Timezone must be an IANA timezone name, for example "
-            "`America/New_York`, `America/Chicago`, `America/Denver`, "
-            "`America/Los_Angeles`, or `UTC`."
-        ) from exc
-    return timezone_name
-
-
 def _resolve_lock_deadline(
     *,
     existing: GuildSettings | None,
-    timezone_name: str,
-    lock_deadline_local: str | None,
+    lock_deadline_utc: str | None,
     clear_lock_deadline: bool,
 ) -> datetime | None:
     if clear_lock_deadline:
         return None
-    if lock_deadline_local:
-        return _parse_local_datetime(lock_deadline_local, timezone_name)
+    if lock_deadline_utc:
+        return _parse_utc_datetime(lock_deadline_utc)
     return existing.lock_deadline_utc if existing else None
-
-
-def _parse_local_datetime(value: str, timezone_name: str) -> datetime:
-    normalized = value.strip()
-    if normalized.endswith("Z") or "+" in normalized[10:] or "-" in normalized[10:]:
-        raise ValueError(
-            "lock_deadline_local should be a local time without a UTC offset, "
-            "for example `2026-06-11 12:00`."
-        )
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError as exc:
-        raise ValueError(
-            "lock_deadline_local must look like `2026-06-11 12:00` "
-            "or `2026-06-11T12:00`."
-        ) from exc
-    if parsed.tzinfo is not None:
-        raise ValueError("lock_deadline_local should not include a timezone offset.")
-    return parsed.replace(tzinfo=ZoneInfo(timezone_name)).astimezone(timezone.utc)
 
 
 def _updated_scoring_rules(
@@ -984,7 +944,11 @@ def _updated_scoring_rules(
     champion: int | None,
     runner_up: int | None,
 ) -> dict[str, int]:
-    rules = _default_scoring_rules() if use_default_scoring else asdict(ScoringRules.from_mapping(baseline))
+    rules = (
+        _default_scoring_rules()
+        if use_default_scoring
+        else asdict(ScoringRules.from_mapping(baseline))
+    )
     updates = {
         "group_winner": group_winner,
         "group_runner_up": group_runner_up,
@@ -1018,9 +982,8 @@ def _config_has_updates(
     *,
     announcement_channel: object | None,
     leaderboard_channel: object | None,
-    timezone_name: str | None,
     share_full_bracket_default: bool | None,
-    lock_deadline_local: str | None,
+    lock_deadline_utc: str | None,
     clear_lock_deadline: bool,
     use_default_scoring: bool,
     scoring_values: tuple[int | None, ...],
@@ -1029,9 +992,8 @@ def _config_has_updates(
         (
             announcement_channel is not None,
             leaderboard_channel is not None,
-            bool(timezone_name),
             share_full_bracket_default is not None,
-            bool(lock_deadline_local),
+            bool(lock_deadline_utc),
             clear_lock_deadline,
             use_default_scoring,
             any(value is not None for value in scoring_values),
@@ -1119,7 +1081,6 @@ def _setup_embed(
         value=_format_channel(settings.leaderboard_channel_id),
         inline=True,
     )
-    embed.add_field(name="Timezone", value=settings.timezone, inline=True)
     embed.add_field(
         name="Privacy default",
         value=(
@@ -1135,9 +1096,8 @@ def _setup_embed(
     )
     embed.add_field(
         name="Lock deadline",
-        value=_format_lock_deadline_with_local(
+        value=_format_lock_deadline_for_discord(
             settings.lock_deadline_utc,
-            settings.timezone,
             tournament=tournament,
         ),
         inline=False,
@@ -1176,9 +1136,8 @@ def _format_channel(channel_id: str | None) -> str:
     return f"<#{channel_id}>" if channel_id else "Not configured"
 
 
-def _format_lock_deadline_with_local(
+def _format_lock_deadline_for_discord(
     deadline: datetime | None,
-    timezone_name: str,
     *,
     tournament: object | None = None,
 ) -> str:
@@ -1186,19 +1145,8 @@ def _format_lock_deadline_with_local(
         first_kickoff = _first_kickoff_utc(tournament)
         if first_kickoff is None:
             return "Auto-locks at first tournament kickoff"
-        return "Auto-locks at first kickoff\n" + _format_datetime_with_local(
-            first_kickoff,
-            timezone_name,
-        )
-    return _format_datetime_with_local(deadline, timezone_name)
-
-
-def _format_datetime_with_local(deadline: datetime, timezone_name: str) -> str:
-    local_deadline = deadline.astimezone(ZoneInfo(timezone_name))
-    return (
-        f"{local_deadline:%Y-%m-%d %H:%M %Z} "
-        f"({deadline:%Y-%m-%d %H:%M UTC})"
-    )
+        return "Auto-locks at first kickoff\n" + discord_datetime(first_kickoff)
+    return discord_datetime(deadline)
 
 
 def _format_scoring_rules(rules: ScoringRules) -> str:
@@ -1237,7 +1185,6 @@ def _status_embed(
     *,
     settings: object,
     tournament: object,
-    default_timezone: str,
     command_sync_status: str,
 ) -> discord.Embed:
     embed = discord.Embed(
@@ -1258,7 +1205,7 @@ def _status_embed(
         name="Data",
         value=(
             f"Hash `{tournament.config_hash[:12]}`\n"
-            f"Imported {tournament.imported_at:%Y-%m-%d %H:%M UTC}"
+            f"Imported {discord_datetime(tournament.imported_at)}"
             if tournament is not None
             else "Run `/admin setup` to attach the canonical 2026 World Cup data."
         ),
@@ -1272,15 +1219,13 @@ def _status_embed(
     embed.add_field(
         name="Lock deadline",
         value=(
-            f"{settings.lock_deadline_utc:%Y-%m-%d %H:%M UTC}"
-            if settings and settings.lock_deadline_utc
+            _format_lock_deadline_for_discord(
+                settings.lock_deadline_utc,
+                tournament=tournament,
+            )
+            if settings
             else "First tournament kickoff"
         ),
-        inline=True,
-    )
-    embed.add_field(
-        name="Timezone",
-        value=settings.timezone if settings else default_timezone,
         inline=True,
     )
     embed.add_field(
@@ -1360,7 +1305,7 @@ def _rules_embed(*, settings: object, tournament: object) -> discord.Embed:
     return embed
 
 
-def _lock_embed(*, settings: object) -> discord.Embed:
+def _lock_embed(*, settings: object, tournament: object | None = None) -> discord.Embed:
     embed = discord.Embed(title="Prediction lock", color=discord.Color.gold())
     embed.add_field(
         name="Status",
@@ -1370,8 +1315,11 @@ def _lock_embed(*, settings: object) -> discord.Embed:
     embed.add_field(
         name="Deadline",
         value=(
-            f"{settings.lock_deadline_utc:%Y-%m-%d %H:%M UTC}"
-            if settings and settings.lock_deadline_utc
+            _format_lock_deadline_for_discord(
+                settings.lock_deadline_utc,
+                tournament=tournament,
+            )
+            if settings
             else "First tournament kickoff"
         ),
         inline=True,
@@ -1403,9 +1351,9 @@ def _reminder_embed(*, settings: object, tournament: object) -> discord.Embed:
     embed.add_field(
         name="Deadline",
         value=(
-            _format_lock_deadline_with_local(
+            _format_lock_deadline_for_discord(
                 settings.lock_deadline_utc,
-                settings.timezone,
+                tournament=tournament,
             )
             if settings
             else "First tournament kickoff"
@@ -1444,10 +1392,17 @@ def _parse_utc_datetime(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _format_lock_deadline(deadline: datetime | None) -> str:
+def _format_lock_deadline(
+    deadline: datetime | None,
+    *,
+    tournament: object | None = None,
+) -> str:
     if deadline is None:
-        return "first tournament kickoff"
-    return f"{deadline:%Y-%m-%d %H:%M UTC}"
+        first_kickoff = _first_kickoff_utc(tournament)
+        if first_kickoff is None:
+            return "first tournament kickoff"
+        return discord_datetime(first_kickoff)
+    return discord_datetime(deadline)
 
 
 def setup(bot: discord.Bot) -> None:

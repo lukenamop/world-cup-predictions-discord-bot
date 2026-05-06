@@ -42,10 +42,11 @@ class CommandOptionMetadataTests(unittest.TestCase):
         defaults = _argument_defaults(setup_command)
 
         self.assertNotIn("clear_lock_deadline", defaults)
+        self.assertNotIn("timezone_name", defaults)
+        self.assertNotIn("lock_deadline_local", defaults)
         self.assertIsNone(defaults["announcement_channel"])
         self.assertIsNone(defaults["leaderboard_channel"])
-        self.assertIsNotNone(defaults["timezone_name"])
-        self.assertIsNotNone(defaults["lock_deadline_local"])
+        self.assertIsNotNone(defaults["lock_deadline_utc"])
 
     def test_command_arguments_use_described_discord_options(self) -> None:
         for path in COG_PATHS:

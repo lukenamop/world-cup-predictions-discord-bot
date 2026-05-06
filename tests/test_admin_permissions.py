@@ -157,21 +157,16 @@ class AdminLockDeadlineParsingTests(unittest.TestCase):
 
 
 class AdminSetupConfigHelperTests(unittest.TestCase):
-    def test_parse_local_datetime_uses_configured_timezone(self) -> None:
+    def test_resolve_lock_deadline_accepts_utc_input(self) -> None:
         admin_module = _load_admin_module_with_fake_discord()
 
-        parsed = admin_module._parse_local_datetime(
-            "2026-06-11 12:00",
-            "America/New_York",
+        parsed = admin_module._resolve_lock_deadline(
+            existing=None,
+            lock_deadline_utc="2026-06-11T18:00:00Z",
+            clear_lock_deadline=False,
         )
 
-        self.assertEqual(parsed, datetime(2026, 6, 11, 16, 0, tzinfo=timezone.utc))
-
-    def test_validate_timezone_name_guides_invalid_values(self) -> None:
-        admin_module = _load_admin_module_with_fake_discord()
-
-        with self.assertRaisesRegex(ValueError, "America/New_York"):
-            admin_module._validate_timezone_name("Eastern")
+        self.assertEqual(parsed, datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc))
 
     def test_updated_scoring_rules_applies_only_requested_values(self) -> None:
         admin_module = _load_admin_module_with_fake_discord()
@@ -208,7 +203,8 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
 
         self.assertEqual(embed.title, "Prediction reminder")
         self.assertIn("/predict", _field_value(embed, "Commands"))
-        self.assertIn("2026-06-11 14:00", _field_value(embed, "Deadline"))
+        self.assertIn("<t:1781200800:F>", _field_value(embed, "Deadline"))
+        self.assertIn("<t:1781200800:R>", _field_value(embed, "Deadline"))
 
     def test_setup_embed_uses_admin_friendly_labels_and_next_steps(self) -> None:
         admin_module = _load_admin_module_with_fake_discord()
@@ -245,7 +241,8 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         )
         self.assertIn("/preferences", _field_value(embed, "Privacy default"))
         self.assertIn("Auto-locks at first kickoff", _field_value(embed, "Lock deadline"))
-        self.assertIn("2026-06-11 14:00 CDT", _field_value(embed, "Lock deadline"))
+        self.assertIn("<t:1781204400:F>", _field_value(embed, "Lock deadline"))
+        self.assertIn("<t:1781204400:R>", _field_value(embed, "Lock deadline"))
         self.assertIn(
             "Config `fifa-world-cup-2026`, version `3b3023f182d9`",
             _field_value(embed, "Tournament"),

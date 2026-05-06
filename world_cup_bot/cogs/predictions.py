@@ -34,6 +34,7 @@ from world_cup_bot.services.prediction_view_service import (
     group_sheet_render_model,
     public_prediction_lines,
 )
+from world_cup_bot.ui.discord_formatting import discord_datetime
 from world_cup_bot.ui.image_renderer import render_bracket_png, render_groups_png
 
 
@@ -550,7 +551,7 @@ def _format_pending_selection(step: PredictionStep, values: list[str]) -> str:
 def _format_deadline(deadline: datetime | None) -> str:
     if deadline is None:
         return "First kickoff"
-    return f"{deadline:%Y-%m-%d %H:%M UTC}"
+    return discord_datetime(deadline)
 
 
 def _display_name(author: object) -> str:
@@ -575,7 +576,7 @@ def _prediction_summary_embed(snapshot: PredictionSnapshot) -> discord.Embed:
     embed.add_field(
         name="Lock",
         value=(
-            f"{snapshot.lock_deadline_utc:%Y-%m-%d %H:%M UTC}"
+            discord_datetime(snapshot.lock_deadline_utc)
             if snapshot.lock_deadline_utc
             else "Not configured"
         ),
