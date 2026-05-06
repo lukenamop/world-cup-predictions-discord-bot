@@ -47,12 +47,35 @@ class AdminCog(commands.Cog):
     async def setup_command(
         self,
         ctx: discord.ApplicationContext,
-        announcement_channel: discord.TextChannel | None = None,
-        leaderboard_channel: discord.TextChannel | None = None,
-        timezone_name: str | None = None,
-        share_full_bracket_default: bool | None = None,
-        lock_deadline_local: str | None = None,
-        clear_lock_deadline: bool = False,
+        announcement_channel: discord.Option(
+            discord.TextChannel,
+            "Text channel for prediction notices and reminders.",
+            required=False,
+        ) = None,
+        leaderboard_channel: discord.Option(
+            discord.TextChannel,
+            "Text channel for leaderboard posts.",
+            required=False,
+        ) = None,
+        timezone_name: discord.Option(
+            str,
+            "IANA timezone for local deadlines, such as America/New_York.",
+            required=False,
+        ) = None,
+        share_full_bracket_default: discord.Option(
+            bool,
+            "Default full-bracket sharing preference for new users.",
+            required=False,
+        ) = None,
+        lock_deadline_local: discord.Option(
+            str,
+            "Local lock deadline like 2026-06-11 12:00.",
+            required=False,
+        ) = None,
+        clear_lock_deadline: discord.Option(
+            bool,
+            "Clear the configured lock deadline during setup.",
+        ) = False,
     ) -> None:
         if not await self._ensure_admin(ctx):
             return
@@ -139,24 +162,105 @@ class AdminCog(commands.Cog):
     async def config_command(
         self,
         ctx: discord.ApplicationContext,
-        announcement_channel: discord.TextChannel | None = None,
-        leaderboard_channel: discord.TextChannel | None = None,
-        timezone_name: str | None = None,
-        share_full_bracket_default: bool | None = None,
-        lock_deadline_local: str | None = None,
-        clear_lock_deadline: bool = False,
-        use_default_scoring: bool = False,
-        group_winner: int | None = None,
-        group_runner_up: int | None = None,
-        group_third_place_qualifier: int | None = None,
-        round_of_32_advancement: int | None = None,
-        round_of_16_advancement: int | None = None,
-        quarter_final_advancement: int | None = None,
-        semi_final_advancement: int | None = None,
-        final_advancement: int | None = None,
-        third_place_winner: int | None = None,
-        champion: int | None = None,
-        runner_up: int | None = None,
+        announcement_channel: discord.Option(
+            discord.TextChannel,
+            "Text channel for prediction notices and reminders.",
+            required=False,
+        ) = None,
+        leaderboard_channel: discord.Option(
+            discord.TextChannel,
+            "Text channel for leaderboard posts.",
+            required=False,
+        ) = None,
+        timezone_name: discord.Option(
+            str,
+            "IANA timezone for local deadlines, such as America/New_York.",
+            required=False,
+        ) = None,
+        share_full_bracket_default: discord.Option(
+            bool,
+            "Default full-bracket sharing preference for new users.",
+            required=False,
+        ) = None,
+        lock_deadline_local: discord.Option(
+            str,
+            "Local lock deadline like 2026-06-11 12:00.",
+            required=False,
+        ) = None,
+        clear_lock_deadline: discord.Option(
+            bool,
+            "Clear the configured lock deadline.",
+        ) = False,
+        use_default_scoring: discord.Option(
+            bool,
+            "Reset scoring values to the MVP defaults.",
+        ) = False,
+        group_winner: discord.Option(
+            int,
+            "Points for correctly predicting a group winner.",
+            min_value=0,
+            required=False,
+        ) = None,
+        group_runner_up: discord.Option(
+            int,
+            "Points for correctly predicting a group runner-up.",
+            min_value=0,
+            required=False,
+        ) = None,
+        group_third_place_qualifier: discord.Option(
+            int,
+            "Points for a correct advancing third-place team.",
+            min_value=0,
+            required=False,
+        ) = None,
+        round_of_32_advancement: discord.Option(
+            int,
+            "Points for a correct Round of 32 advancement pick.",
+            min_value=0,
+            required=False,
+        ) = None,
+        round_of_16_advancement: discord.Option(
+            int,
+            "Points for a correct Round of 16 advancement pick.",
+            min_value=0,
+            required=False,
+        ) = None,
+        quarter_final_advancement: discord.Option(
+            int,
+            "Points for a correct quarter-final advancement pick.",
+            min_value=0,
+            required=False,
+        ) = None,
+        semi_final_advancement: discord.Option(
+            int,
+            "Points for a correct semi-final advancement pick.",
+            min_value=0,
+            required=False,
+        ) = None,
+        final_advancement: discord.Option(
+            int,
+            "Points for correctly predicting a finalist.",
+            min_value=0,
+            required=False,
+        ) = None,
+        third_place_winner: discord.Option(
+            int,
+            "Points for correctly predicting the third-place winner.",
+            min_value=0,
+            required=False,
+        ) = None,
+        champion: discord.Option(
+            int,
+            "Points for correctly predicting the champion.",
+            min_value=0,
+            required=False,
+        ) = None,
+        runner_up: discord.Option(
+            int,
+            "Points for correctly predicting the runner-up.",
+            min_value=0,
+            required=False,
+        ) = None,
     ) -> None:
         if not await self._ensure_admin(ctx):
             return
@@ -355,8 +459,15 @@ class AdminCog(commands.Cog):
     async def lock_command(
         self,
         ctx: discord.ApplicationContext,
-        deadline_utc: str | None = None,
-        clear: bool = False,
+        deadline_utc: discord.Option(
+            str,
+            "UTC ISO-8601 deadline like 2026-06-11T18:00:00Z.",
+            required=False,
+        ) = None,
+        clear: discord.Option(
+            bool,
+            "Clear the configured lock deadline.",
+        ) = False,
     ) -> None:
         if not await self._ensure_admin(ctx):
             return
@@ -436,8 +547,16 @@ class AdminCog(commands.Cog):
     async def post_command(
         self,
         ctx: discord.ApplicationContext,
-        kind: str = "leaderboard",
-        channel: discord.TextChannel | None = None,
+        kind: discord.Option(
+            str,
+            "Snapshot type to post.",
+            choices=["leaderboard", "rules", "lock", "status", "reminder"],
+        ) = "leaderboard",
+        channel: discord.Option(
+            discord.TextChannel,
+            "Text channel to post to instead of the configured default.",
+            required=False,
+        ) = None,
     ) -> None:
         if not await self._ensure_admin(ctx):
             return

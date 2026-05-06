@@ -70,11 +70,29 @@ class OperatorCog(commands.Cog):
     async def resolve_command(
         self,
         ctx: discord.ApplicationContext,
-        scope: str,
-        ordered_team_ids: str,
-        reason: str,
-        group_id: str | None = None,
-        config_hash: str | None = None,
+        scope: discord.Option(
+            str,
+            "Tie scope to adjudicate.",
+            choices=["group", "best_third"],
+        ),
+        ordered_team_ids: discord.Option(
+            str,
+            "Comma-separated team IDs in official resolved order.",
+        ),
+        reason: discord.Option(
+            str,
+            "Official reason or source for the adjudication.",
+        ),
+        group_id: discord.Option(
+            str,
+            "Group ID for group-scope adjudications, such as A.",
+            required=False,
+        ) = None,
+        config_hash: discord.Option(
+            str,
+            "Tournament config hash when multiple active configs exist.",
+            required=False,
+        ) = None,
     ) -> None:
         if not await self._ensure_operator(ctx):
             return

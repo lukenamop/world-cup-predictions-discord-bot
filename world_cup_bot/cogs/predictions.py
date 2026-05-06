@@ -53,7 +53,11 @@ class PredictionsCog(commands.Cog):
     async def prediction_command(
         self,
         ctx: discord.ApplicationContext,
-        user: discord.Member | None = None,
+        user: discord.Option(
+            discord.Member,
+            "Member whose public prediction summary to show.",
+            required=False,
+        ) = None,
     ) -> None:
         snapshot = await self._snapshot_or_respond(ctx, user)
         if snapshot is None:
@@ -64,7 +68,11 @@ class PredictionsCog(commands.Cog):
     async def groups_command(
         self,
         ctx: discord.ApplicationContext,
-        user: discord.Member | None = None,
+        user: discord.Option(
+            discord.Member,
+            "Member whose group prediction sheet to render.",
+            required=False,
+        ) = None,
     ) -> None:
         snapshot = await self._snapshot_or_respond(ctx, user)
         if snapshot is None:
@@ -88,7 +96,11 @@ class PredictionsCog(commands.Cog):
     async def bracket_command(
         self,
         ctx: discord.ApplicationContext,
-        user: discord.Member | None = None,
+        user: discord.Option(
+            discord.Member,
+            "Member whose knockout bracket to render.",
+            required=False,
+        ) = None,
     ) -> None:
         snapshot = await self._snapshot_or_respond(ctx, user)
         if snapshot is None:
@@ -112,7 +124,11 @@ class PredictionsCog(commands.Cog):
     async def preferences_command(
         self,
         ctx: discord.ApplicationContext,
-        share_full_bracket: bool | None = None,
+        share_full_bracket: discord.Option(
+            bool,
+            "Whether other members can view your full bracket and group images.",
+            required=False,
+        ) = None,
     ) -> None:
         if ctx.guild is None:
             await ctx.respond("Preferences can only be used in a server.", ephemeral=True)

@@ -22,7 +22,11 @@ class LeaderboardCog(commands.Cog):
     async def leaderboard_command(
         self,
         ctx: discord.ApplicationContext,
-        page: int = 1,
+        page: discord.Option(
+            int,
+            "Leaderboard page number to open.",
+            min_value=1,
+        ) = 1,
     ) -> None:
         if ctx.guild is None:
             await ctx.respond("Leaderboards can only be used in a server.", ephemeral=True)
@@ -55,7 +59,11 @@ class LeaderboardCog(commands.Cog):
     async def rank_command(
         self,
         ctx: discord.ApplicationContext,
-        user: discord.Member | None = None,
+        user: discord.Option(
+            discord.Member,
+            "Member whose current rank to show.",
+            required=False,
+        ) = None,
     ) -> None:
         if ctx.guild is None:
             await ctx.respond("Ranks can only be used in a server.", ephemeral=True)
@@ -84,7 +92,11 @@ class LeaderboardCog(commands.Cog):
     async def points_command(
         self,
         ctx: discord.ApplicationContext,
-        user: discord.Member | None = None,
+        user: discord.Option(
+            discord.Member,
+            "Member whose point breakdown to show.",
+            required=False,
+        ) = None,
     ) -> None:
         if ctx.guild is None:
             await ctx.respond("Points can only be used in a server.", ephemeral=True)
