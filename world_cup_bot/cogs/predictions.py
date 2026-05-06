@@ -286,9 +286,13 @@ class PredictionEntryView(discord.ui.View):
         self.pending_values: list[str] = []
         self.review_group_id: str | None = None
         self.finished = False
+        self.cancelled = False
         self._refresh_items()
 
     def build_embed(self) -> discord.Embed:
+        if self.cancelled:
+            return self._cancelled_embed()
+
         model = self.session.model
         review_group = self._review_group()
         step = next_prediction_step(model, self.session.data)
@@ -513,6 +517,7 @@ class PredictionEntryView(discord.ui.View):
         self.review_group_id = None
         self.notice = "Prediction entry cancelled. No changes were submitted."
         self.finished = True
+        self.cancelled = True
         self.clear_items()
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
         self.stop()
@@ -532,6 +537,24 @@ class PredictionEntryView(discord.ui.View):
     async def _edit(self, interaction: discord.Interaction) -> None:
         self._refresh_items()
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    def _cancelled_embed(self) -> discord.Embed:
+        embed = discord.Embed(
+            title="Prediction Entry Cancelled",
+            description="No changes were submitted.",
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(
+            name="Tournament",
+            value=self.session.model.name,
+            inline=True,
+        )
+        embed.add_field(
+            name="Next step",
+            value="Run `/predict` again to start over.",
+            inline=False,
+        )
+        return embed
 
     def _stage_or_apply_selection(self, step: PredictionStep, values: list[str]) -> None:
         if step.kind == "group_pick":

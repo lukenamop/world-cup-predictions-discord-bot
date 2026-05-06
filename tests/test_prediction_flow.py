@@ -285,9 +285,14 @@ class PredictionEntryViewTests(unittest.IsolatedAsyncioTestCase):
         await button_by_label["Cancel"].callback(interaction)
 
         self.assertTrue(view.finished)
+        self.assertTrue(view.cancelled)
         self.assertEqual(view.children, [])
         self.assertEqual(view.notice, "Prediction entry cancelled. No changes were submitted.")
-        self.assertEqual(interaction.response.embed.title, "Group A: Pick #1")
+        self.assertEqual(interaction.response.embed.title, "Prediction Entry Cancelled")
+        self.assertEqual(interaction.response.embed.description, "No changes were submitted.")
+        fields = {field.name: field.value for field in interaction.response.embed.fields}
+        self.assertEqual(fields["Next step"], "Run `/predict` again to start over.")
+        self.assertNotIn("Current group ranking", fields)
 
 
 class PredictionFlowTests(unittest.TestCase):
