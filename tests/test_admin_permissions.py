@@ -190,7 +190,7 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         self.assertEqual(rules["champion"], 30)
         self.assertEqual(rules["runner_up"], 15)
 
-    def test_reminder_embed_includes_deadline_and_prediction_commands(self) -> None:
+    def test_lock_embed_includes_deadline_and_prediction_commands(self) -> None:
         admin_module = _load_admin_module_with_fake_discord()
         settings = types.SimpleNamespace(
             predictions_open=True,
@@ -199,9 +199,10 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         )
         tournament = types.SimpleNamespace(tournament_name="Test Cup")
 
-        embed = admin_module._reminder_embed(settings=settings, tournament=tournament)
+        embed = admin_module._lock_embed(settings=settings, tournament=tournament)
 
-        self.assertEqual(embed.title, "Prediction Reminder")
+        self.assertEqual(embed.title, "Prediction Lock")
+        self.assertIn("predictions are open", embed.description)
         self.assertIn("/predict", _field_value(embed, "Commands"))
         self.assertIn("<t:1781200800:F>", _field_value(embed, "Deadline"))
         self.assertIn("<t:1781200800:R>", _field_value(embed, "Deadline"))
@@ -323,9 +324,11 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         embed = admin_module._lock_embed(settings=settings, tournament=tournament)
 
         self.assertEqual(embed.title, "Prediction Lock")
+        self.assertIn("Submit or edit your bracket", embed.description)
         self.assertEqual(_field_value(embed, "Tournament"), "FIFA World Cup 2026")
         self.assertEqual(_field_value(embed, "Status"), "Open")
         self.assertIn("<t:1781200800:F>", _field_value(embed, "Deadline"))
+        self.assertIn("/edit", _field_value(embed, "Commands"))
 
 
 class _FakeContext:

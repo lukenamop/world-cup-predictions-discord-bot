@@ -195,7 +195,7 @@ Admin commands:
 - `/admin close`: closes prediction entry without changing the configured lock deadline.
 - `/admin lock`: sets, views, or forces prediction locks.
 - `/admin recalc`: recalculates scores and leaderboard totals.
-- `/admin post`: posts leaderboard, lock, reminder, or rules snapshots to configured channels.
+- `/admin post`: posts leaderboard, rules, or lock snapshots to configured channels. Lock posts include reminder copy and prediction commands.
 - `/admin export`: exports tournament, prediction, scoring, or leaderboard data.
 - `/admin backup`: creates an operator-friendly backup of bot configuration and database state.
 

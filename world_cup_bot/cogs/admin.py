@@ -31,6 +31,8 @@ from world_cup_bot.ui.discord_formatting import discord_datetime
 
 DEFAULT_PRIVACY_DEFAULTS = {"share_full_bracket": False}
 LOCK_MODE = "full_bracket_lock"
+POST_KIND_CHOICES = ["leaderboard", "rules", "lock"]
+POST_KIND_SET = set(POST_KIND_CHOICES)
 
 
 @dataclass(frozen=True)
@@ -690,7 +692,7 @@ class AdminCog(commands.Cog):
         "kind",
         str,
         description="Snapshot type to post.",
-        choices=["leaderboard", "rules", "lock", "reminder"],
+        choices=["leaderboard", "rules", "lock"],
     )
     @discord.option(
         "channel",
@@ -704,7 +706,7 @@ class AdminCog(commands.Cog):
         kind: discord.Option(
             str,
             "Snapshot type to post.",
-            choices=["leaderboard", "rules", "lock", "reminder"],
+            choices=POST_KIND_CHOICES,
         ) = "leaderboard",
         channel: discord.Option(
             discord.TextChannel,
@@ -717,9 +719,9 @@ class AdminCog(commands.Cog):
 
         guild_id = _guild_id(ctx)
         normalized = kind.strip().lower()
-        if normalized not in {"leaderboard", "rules", "lock", "reminder"}:
+        if normalized not in POST_KIND_SET:
             await ctx.respond(
-                "Post kind must be one of: leaderboard, rules, lock, reminder.",
+                "Post kind must be one of: leaderboard, rules, lock.",
                 ephemeral=True,
             )
             return
@@ -832,9 +834,7 @@ class AdminCog(commands.Cog):
             return _rules_embed(settings=settings, tournament=tournament)
         if kind == "lock":
             return _lock_embed(settings=settings, tournament=tournament)
-        if kind == "reminder":
-            return _reminder_embed(settings=settings, tournament=tournament)
-        raise ValueError("Post kind must be one of: leaderboard, rules, lock, reminder.")
+        raise ValueError("Post kind must be one of: leaderboard, rules, lock.")
 
     async def _ensure_admin(self, ctx: discord.ApplicationContext) -> bool:
         if ctx.guild is None:
@@ -1323,33 +1323,9 @@ def _rules_embed(*, settings: object, tournament: object) -> discord.Embed:
 
 
 def _lock_embed(*, settings: object, tournament: object | None = None) -> discord.Embed:
-    embed = discord.Embed(title="Prediction Lock", color=discord.Color.gold())
-    if tournament is not None:
-        embed.add_field(name="Tournament", value=tournament.tournament_name, inline=False)
-    embed.add_field(
-        name="Status",
-        value="Open" if settings and settings.predictions_open else "Closed",
-        inline=True,
-    )
-    embed.add_field(
-        name="Deadline",
-        value=(
-            _format_lock_deadline_for_discord(
-                settings.lock_deadline_utc,
-                tournament=tournament,
-            )
-            if settings
-            else "First tournament kickoff"
-        ),
-        inline=True,
-    )
-    return embed
-
-
-def _reminder_embed(*, settings: object, tournament: object) -> discord.Embed:
     predictions_open = bool(settings and settings.predictions_open)
     embed = discord.Embed(
-        title="Prediction Reminder",
+        title="Prediction Lock",
         description=(
             "World Cup predictions are open. Submit or edit your bracket before the lock."
             if predictions_open
@@ -1357,11 +1333,8 @@ def _reminder_embed(*, settings: object, tournament: object) -> discord.Embed:
         ),
         color=discord.Color.gold(),
     )
-    embed.add_field(
-        name="Tournament",
-        value=tournament.tournament_name if tournament is not None else "Not configured",
-        inline=False,
-    )
+    if tournament is not None:
+        embed.add_field(name="Tournament", value=tournament.tournament_name, inline=False)
     embed.add_field(
         name="Status",
         value="Open" if predictions_open else "Closed",

@@ -1,6 +1,6 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 10 work from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, canonical 2026 World Cup tournament configuration, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images with flags, preferences, guided admin setup/configuration, operator sync, admin posting and reminders, exports, and backups. Milestone 11 release readiness is tracked with the local release check and staging checklist below.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 10 work from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, canonical 2026 World Cup tournament configuration, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images with flags, preferences, guided admin setup/configuration, operator sync, admin posting, exports, and backups. Milestone 11 release readiness is tracked with the local release check and staging checklist below.
 
 ## Current Command Surface
 
@@ -22,7 +22,7 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/admin close` closes prediction entry without changing the lock deadline.
 - `/admin lock [deadline_utc] [clear]` sets or clears the full-bracket lock deadline. Use ISO-8601 UTC timestamps such as `2026-06-11T18:00:00Z`.
 - `/admin recalc` recalculates submitted prediction scores from stored results.
-- `/admin post [kind] [channel]` posts `leaderboard`, `rules`, `lock`, or `reminder` snapshots to configured channels by default, or to an explicit override channel.
+- `/admin post [kind] [channel]` posts `leaderboard`, `rules`, or `lock` snapshots to configured channels by default, or to an explicit override channel.
 - `/admin export` returns a JSON export of submitted predictions and current scores.
 - `/admin backup` returns an operator-friendly JSON backup of league settings, active tournament config, predictions, scores, stored results, and recent sync runs.
 - `/operator sync` runs one global live-result sync for all configured guilds. It is registered only in `OPERATOR_GUILD_ID` and requires Discord Administrator permission or an ID listed in `OWNER_USER_IDS`.
@@ -227,13 +227,12 @@ Use `/admin config` with no options to view current settings. Pass only the opti
 
 ## Admin Posting, Export, And Backup
 
-Admins can post snapshots without manually composing announcements. Leaderboards default to the configured leaderboard channel; rules, lock, and reminder posts default to the configured prediction announcement channel. Pass `channel:` to override the default destination.
+Admins can post snapshots without manually composing announcements. Leaderboards default to the configured leaderboard channel; rules and lock posts default to the configured prediction announcement channel. The lock post includes prediction status, the deadline, and submission/edit commands. Pass `channel:` to override the default destination.
 
 ```text
 /admin post kind:leaderboard
 /admin post kind:rules channel:#predictions
 /admin post kind:lock
-/admin post kind:reminder
 ```
 
 Prediction exports and backups are returned as ephemeral JSON attachments and write audit log rows:
@@ -333,7 +332,7 @@ Run this manual flow in the staging guild and record any unexpected response:
 3. Run `/admin status` and verify setup, channels, lock, and tournament status.
 4. Run `/admin config` with no options and verify configured scoring, privacy default, and lock behavior.
 5. Run `/admin open`, then `/rules`, and verify prediction entry is open.
-6. Run `/admin post kind:rules`, `/admin post kind:lock`, and `/admin post kind:reminder`; confirm posts land in the announcement channel.
+6. Run `/admin post kind:rules` and `/admin post kind:lock`; confirm posts land in the announcement channel.
 7. Run `/predict`, complete a full bracket, and confirm submission succeeds only after the final confirmation.
 8. Run `/prediction`, `/groups`, and `/bracket` for yourself; confirm concise embeds appear with image attachments for the image commands.
 9. Run `/edit`, change at least one submitted pick, complete the flow, and confirm the previous submission remains active until final confirmation.
