@@ -21,6 +21,19 @@ TYPED_OPTION_PARAMS = {
 
 
 class CommandOptionMetadataTests(unittest.TestCase):
+    def test_command_arguments_have_runtime_option_decorators(self) -> None:
+        for path in COG_PATHS:
+            with self.subTest(path=path.name):
+                tree = ast.parse(path.read_text(), filename=str(path))
+                for function in _command_functions(tree):
+                    decorated_options = _option_decorator_names(function)
+                    for argument in _command_arguments(function):
+                        self.assertIn(
+                            argument.arg,
+                            decorated_options,
+                            f"{path.name}:{function.name}.{argument.arg} needs @discord.option metadata.",
+                        )
+
     def test_admin_setup_requires_channels_and_does_not_clear_locks(self) -> None:
         tree = ast.parse(
             (PROJECT_ROOT / "world_cup_bot" / "cogs" / "admin.py").read_text()
@@ -86,6 +99,23 @@ def _is_command_decorator(decorator: ast.expr) -> bool:
     if isinstance(target, ast.Attribute):
         return target.attr in {"slash_command", "command"}
     return False
+
+
+def _option_decorator_names(function: ast.AsyncFunctionDef) -> set[str]:
+    names: set[str] = set()
+    for decorator in function.decorator_list:
+        if not isinstance(decorator, ast.Call):
+            continue
+        if not isinstance(decorator.func, ast.Attribute):
+            continue
+        if decorator.func.attr != "option":
+            continue
+        if not decorator.args:
+            continue
+        name_arg = decorator.args[0]
+        if isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str):
+            names.add(name_arg.value)
+    return names
 
 
 def _command_arguments(function: ast.AsyncFunctionDef) -> list[ast.arg]:

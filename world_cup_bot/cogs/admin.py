@@ -44,6 +44,34 @@ class AdminCog(commands.Cog):
         name="setup",
         description="Configure this server's league channels, timezone, privacy, scoring, and lock.",
     )
+    @discord.option(
+        "announcement_channel",
+        discord.TextChannel,
+        description="Text channel for prediction notices and reminders.",
+    )
+    @discord.option(
+        "leaderboard_channel",
+        discord.TextChannel,
+        description="Text channel for leaderboard posts.",
+    )
+    @discord.option(
+        "timezone_name",
+        str,
+        description="IANA timezone for local deadlines, such as America/New_York.",
+        required=False,
+    )
+    @discord.option(
+        "share_full_bracket_default",
+        bool,
+        description="Default full-bracket sharing preference for new users.",
+        required=False,
+    )
+    @discord.option(
+        "lock_deadline_local",
+        str,
+        description="Local lock deadline like 2026-06-11 12:00.",
+        required=False,
+    )
     async def setup_command(
         self,
         ctx: discord.ApplicationContext,
@@ -143,6 +171,123 @@ class AdminCog(commands.Cog):
     @admin.command(
         name="config",
         description="View or update this server's league configuration.",
+    )
+    @discord.option(
+        "announcement_channel",
+        discord.TextChannel,
+        description="Text channel for prediction notices and reminders.",
+        required=False,
+    )
+    @discord.option(
+        "leaderboard_channel",
+        discord.TextChannel,
+        description="Text channel for leaderboard posts.",
+        required=False,
+    )
+    @discord.option(
+        "timezone_name",
+        str,
+        description="IANA timezone for local deadlines, such as America/New_York.",
+        required=False,
+    )
+    @discord.option(
+        "share_full_bracket_default",
+        bool,
+        description="Default full-bracket sharing preference for new users.",
+        required=False,
+    )
+    @discord.option(
+        "lock_deadline_local",
+        str,
+        description="Local lock deadline like 2026-06-11 12:00.",
+        required=False,
+    )
+    @discord.option(
+        "clear_lock_deadline",
+        bool,
+        description="Clear the configured lock deadline.",
+    )
+    @discord.option(
+        "use_default_scoring",
+        bool,
+        description="Reset scoring values to the MVP defaults.",
+    )
+    @discord.option(
+        "group_winner",
+        int,
+        description="Points for correctly predicting a group winner.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "group_runner_up",
+        int,
+        description="Points for correctly predicting a group runner-up.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "group_third_place_qualifier",
+        int,
+        description="Points for a correct advancing third-place team.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "round_of_32_advancement",
+        int,
+        description="Points for a correct Round of 32 advancement pick.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "round_of_16_advancement",
+        int,
+        description="Points for a correct Round of 16 advancement pick.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "quarter_final_advancement",
+        int,
+        description="Points for a correct quarter-final advancement pick.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "semi_final_advancement",
+        int,
+        description="Points for a correct semi-final advancement pick.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "final_advancement",
+        int,
+        description="Points for correctly predicting a finalist.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "third_place_winner",
+        int,
+        description="Points for correctly predicting the third-place winner.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "champion",
+        int,
+        description="Points for correctly predicting the champion.",
+        min_value=0,
+        required=False,
+    )
+    @discord.option(
+        "runner_up",
+        int,
+        description="Points for correctly predicting the runner-up.",
+        min_value=0,
+        required=False,
     )
     async def config_command(
         self,
@@ -441,6 +586,17 @@ class AdminCog(commands.Cog):
         name="lock",
         description="Set or clear the UTC full-bracket lock deadline.",
     )
+    @discord.option(
+        "deadline_utc",
+        str,
+        description="UTC ISO-8601 deadline like 2026-06-11T18:00:00Z.",
+        required=False,
+    )
+    @discord.option(
+        "clear",
+        bool,
+        description="Clear the configured lock deadline.",
+    )
     async def lock_command(
         self,
         ctx: discord.ApplicationContext,
@@ -529,6 +685,18 @@ class AdminCog(commands.Cog):
         )
 
     @admin.command(name="post", description="Post a league announcement snapshot.")
+    @discord.option(
+        "kind",
+        str,
+        description="Snapshot type to post.",
+        choices=["leaderboard", "rules", "lock", "status", "reminder"],
+    )
+    @discord.option(
+        "channel",
+        discord.TextChannel,
+        description="Text channel to post to instead of the configured default.",
+        required=False,
+    )
     async def post_command(
         self,
         ctx: discord.ApplicationContext,

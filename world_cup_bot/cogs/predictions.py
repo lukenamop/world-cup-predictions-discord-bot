@@ -50,6 +50,12 @@ class PredictionsCog(commands.Cog):
         await self._start_prediction(ctx, edit_existing=True)
 
     @discord.slash_command(name="prediction", description="Show a user's prediction summary.")
+    @discord.option(
+        "user",
+        discord.Member,
+        description="Member whose public prediction summary to show.",
+        required=False,
+    )
     async def prediction_command(
         self,
         ctx: discord.ApplicationContext,
@@ -65,6 +71,12 @@ class PredictionsCog(commands.Cog):
         await ctx.respond(embed=_prediction_summary_embed(snapshot), ephemeral=True)
 
     @discord.slash_command(name="groups", description="Render a user's group prediction sheet.")
+    @discord.option(
+        "user",
+        discord.Member,
+        description="Member whose group prediction sheet to render.",
+        required=False,
+    )
     async def groups_command(
         self,
         ctx: discord.ApplicationContext,
@@ -93,6 +105,12 @@ class PredictionsCog(commands.Cog):
         )
 
     @discord.slash_command(name="bracket", description="Render a user's knockout bracket.")
+    @discord.option(
+        "user",
+        discord.Member,
+        description="Member whose knockout bracket to render.",
+        required=False,
+    )
     async def bracket_command(
         self,
         ctx: discord.ApplicationContext,
@@ -121,6 +139,12 @@ class PredictionsCog(commands.Cog):
         )
 
     @discord.slash_command(name="preferences", description="Manage prediction sharing preferences.")
+    @discord.option(
+        "share_full_bracket",
+        bool,
+        description="Whether other members can view your full bracket and group images.",
+        required=False,
+    )
     async def preferences_command(
         self,
         ctx: discord.ApplicationContext,

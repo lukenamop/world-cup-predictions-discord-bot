@@ -67,6 +67,34 @@ class OperatorCog(commands.Cog):
         name="resolve",
         description="Adjudicate an official standings tie for the active tournament.",
     )
+    @discord.option(
+        "scope",
+        str,
+        description="Tie scope to adjudicate.",
+        choices=["group", "best_third"],
+    )
+    @discord.option(
+        "ordered_team_ids",
+        str,
+        description="Comma-separated team IDs in official resolved order.",
+    )
+    @discord.option(
+        "reason",
+        str,
+        description="Official reason or source for the adjudication.",
+    )
+    @discord.option(
+        "group_id",
+        str,
+        description="Group ID for group-scope adjudications, such as A.",
+        required=False,
+    )
+    @discord.option(
+        "config_hash",
+        str,
+        description="Tournament config hash when multiple active configs exist.",
+        required=False,
+    )
     async def resolve_command(
         self,
         ctx: discord.ApplicationContext,

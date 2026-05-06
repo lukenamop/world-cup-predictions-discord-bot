@@ -248,10 +248,14 @@ def _load_admin_module_with_fake_discord() -> types.ModuleType:
     discord = types.ModuleType("discord")
     discord.Color = _FakeColor
     discord.Embed = _FakeEmbed
+    discord.File = object
+    discord.Option = _FakeOption
+    discord.option = _fake_option_decorator
     discord.Permissions = _FakePermissions
     discord.SlashCommandGroup = _FakeSlashCommandGroup
     discord.ApplicationContext = object
     discord.Bot = object
+    discord.TextChannel = object
 
     discord_ext = types.ModuleType("discord.ext")
     discord_commands = types.ModuleType("discord.ext.commands")
@@ -291,6 +295,8 @@ def _load_operator_module_with_fake_discord() -> types.ModuleType:
     previous_modules = {name: sys.modules.get(name) for name in module_names}
 
     discord = types.ModuleType("discord")
+    discord.Option = _FakeOption
+    discord.option = _fake_option_decorator
     discord.SlashCommandGroup = _FakeSlashCommandGroup
     discord.ApplicationContext = object
     discord.Bot = object
@@ -323,6 +329,25 @@ def _load_operator_module_with_fake_discord() -> types.ModuleType:
 class _FakePermissions:
     def __init__(self, *, manage_guild: bool = False) -> None:
         self.manage_guild = manage_guild
+
+
+def _FakeOption(input_type: object, description: str, **kwargs: object) -> object:
+    return types.SimpleNamespace(
+        input_type=input_type,
+        description=description,
+        **kwargs,
+    )
+
+
+def _fake_option_decorator(
+    name: str,
+    input_type: object | None = None,
+    **kwargs: object,
+) -> object:
+    def decorator(func: object) -> object:
+        return func
+
+    return decorator
 
 
 class _FakeColor:

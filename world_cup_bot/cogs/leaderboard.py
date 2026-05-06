@@ -19,6 +19,12 @@ class LeaderboardCog(commands.Cog):
         self.bot = bot
 
     @discord.slash_command(name="leaderboard", description="Show current league rankings.")
+    @discord.option(
+        "page",
+        int,
+        description="Leaderboard page number to open.",
+        min_value=1,
+    )
     async def leaderboard_command(
         self,
         ctx: discord.ApplicationContext,
@@ -56,6 +62,12 @@ class LeaderboardCog(commands.Cog):
         await ctx.respond(embed=view.embed(), view=view)
 
     @discord.slash_command(name="rank", description="Show a user's current rank.")
+    @discord.option(
+        "user",
+        discord.Member,
+        description="Member whose current rank to show.",
+        required=False,
+    )
     async def rank_command(
         self,
         ctx: discord.ApplicationContext,
@@ -89,6 +101,12 @@ class LeaderboardCog(commands.Cog):
         await ctx.respond(embed=_rank_embed(ranked), ephemeral=True)
 
     @discord.slash_command(name="points", description="Show a user's point breakdown.")
+    @discord.option(
+        "user",
+        discord.Member,
+        description="Member whose point breakdown to show.",
+        required=False,
+    )
     async def points_command(
         self,
         ctx: discord.ApplicationContext,
