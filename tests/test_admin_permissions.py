@@ -201,7 +201,7 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
 
         embed = admin_module._reminder_embed(settings=settings, tournament=tournament)
 
-        self.assertEqual(embed.title, "Prediction reminder")
+        self.assertEqual(embed.title, "Prediction Reminder")
         self.assertIn("/predict", _field_value(embed, "Commands"))
         self.assertIn("<t:1781200800:F>", _field_value(embed, "Deadline"))
         self.assertIn("<t:1781200800:R>", _field_value(embed, "Deadline"))
@@ -229,7 +229,7 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
 
         embed = admin_module._setup_embed(
             settings=settings,
-            title="Prediction league setup saved",
+            title="Prediction League Setup Saved",
             tournament=tournament,
         )
 
@@ -259,10 +259,51 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             admin_module.ScoringRules.from_mapping(admin_module._default_scoring_rules())
         )
 
-        self.assertIn("Group table picks", value)
-        self.assertIn("Knockout advancement", value)
-        self.assertIn("teams reaching each stage", value)
-        self.assertIn("not exact bracket slots", value)
+        self.assertIn("Group stage points", value)
+        self.assertIn("Group winner +3", value)
+        self.assertIn("Ro32 +1, Ro16 +2, QF +5, SF +10, F +15", value)
+        self.assertIn("Exact placement points", value)
+        self.assertIn("Champion +25, runner-up +15, third-place +10", value)
+
+    def test_rules_embed_uses_public_scoring_copy(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+        settings = admin_module.GuildSettings(
+            guild_id="guild-1",
+            announcement_channel_id="111",
+            leaderboard_channel_id="222",
+            timezone="America/Chicago",
+            live_results_provider="fifa_public_calendar",
+            lock_deadline_utc=None,
+            predictions_open=False,
+            scoring_rules=admin_module._default_scoring_rules(),
+            privacy_defaults={"share_full_bracket": False},
+            lock_mode=admin_module.LOCK_MODE,
+        )
+        tournament = types.SimpleNamespace(tournament_name="FIFA World Cup 2026")
+
+        embed = admin_module._rules_embed(settings=settings, tournament=tournament)
+
+        self.assertEqual(embed.title, "League Rules")
+        self.assertEqual(
+            embed.description,
+            "Pick teams, not scores. Your full bracket locks before the first group "
+            "stage match.",
+        )
+        self.assertEqual(_field_value(embed, "Tournament"), "FIFA World Cup 2026")
+        self.assertEqual(
+            _field_value(embed, "Group stage points"),
+            "Group winner +3, group runner-up +2, advancing third-place team +1",
+        )
+        self.assertEqual(
+            _field_value(embed, "Knockout advancement points"),
+            "Awarded if a predicted team reaches the specified round, even if it "
+            "gets there by a different path.\n"
+            "Ro32 +1, Ro16 +2, QF +5, SF +10, F +15",
+        )
+        self.assertEqual(
+            _field_value(embed, "Exact placement points"),
+            "Champion +25, runner-up +15, third-place +10",
+        )
 
 
 class _FakeContext:

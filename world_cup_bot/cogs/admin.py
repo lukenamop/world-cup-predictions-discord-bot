@@ -164,7 +164,7 @@ class AdminCog(commands.Cog):
         await ctx.respond(
             embed=_setup_embed(
                 settings=saved,
-                title="Prediction league setup saved",
+                title="Prediction League Setup Saved",
                 tournament=tournament,
             ),
             ephemeral=True,
@@ -424,7 +424,7 @@ class AdminCog(commands.Cog):
             await ctx.respond(
                 embed=_setup_embed(
                     settings=existing,
-                    title="Prediction league configuration",
+                    title="Prediction League Configuration",
                     tournament=tournament,
                 ),
                 ephemeral=True,
@@ -505,7 +505,7 @@ class AdminCog(commands.Cog):
         await ctx.respond(
             embed=_setup_embed(
                 settings=saved,
-                title="Prediction league configuration updated",
+                title="Prediction League Configuration Updated",
                 tournament=tournament,
             ),
             ephemeral=True,
@@ -1151,19 +1151,28 @@ def _format_lock_deadline_for_discord(
 
 def _format_scoring_rules(rules: ScoringRules) -> str:
     return (
-        "Group table picks: "
-        f"winner {rules.group_winner}, runner-up {rules.group_runner_up}, "
-        f"advancing third-place team {rules.group_third_place_qualifier}\n"
-        "Knockout advancement: "
-        f"Round of 32 {rules.round_of_32_advancement}, "
-        f"Round of 16 {rules.round_of_16_advancement}, "
-        f"quarter-final {rules.quarter_final_advancement}, "
-        f"semi-final {rules.semi_final_advancement}, finalist {rules.final_advancement}\n"
-        "Final placements: "
-        f"champion {rules.champion}, runner-up {rules.runner_up}, "
-        f"third-place match winner {rules.third_place_winner}\n"
-        "Knockout points are for teams reaching each stage, not exact bracket slots."
+        "Group stage points: "
+        f"Group winner {_format_points(rules.group_winner)}, "
+        f"group runner-up {_format_points(rules.group_runner_up)}, "
+        "advancing third-place team "
+        f"{_format_points(rules.group_third_place_qualifier)}\n"
+        "Knockout advancement points: "
+        "Awarded if a predicted team reaches the specified round, even if it gets "
+        "there by a different path.\n"
+        f"Ro32 {_format_points(rules.round_of_32_advancement)}, "
+        f"Ro16 {_format_points(rules.round_of_16_advancement)}, "
+        f"QF {_format_points(rules.quarter_final_advancement)}, "
+        f"SF {_format_points(rules.semi_final_advancement)}, "
+        f"F {_format_points(rules.final_advancement)}\n"
+        "Exact placement points: "
+        f"Champion {_format_points(rules.champion)}, "
+        f"runner-up {_format_points(rules.runner_up)}, "
+        f"third-place {_format_points(rules.third_place_winner)}"
     )
+
+
+def _format_points(value: int) -> str:
+    return f"+{value}"
 
 
 def _first_kickoff_utc(tournament: object | None) -> datetime | None:
@@ -1188,7 +1197,7 @@ def _status_embed(
     command_sync_status: str,
 ) -> discord.Embed:
     embed = discord.Embed(
-        title="World Cup league status",
+        title="World Cup League Status",
         color=discord.Color.blurple(),
     )
     embed.add_field(
@@ -1266,39 +1275,44 @@ def _status_embed(
 def _rules_embed(*, settings: object, tournament: object) -> discord.Embed:
     rules = ScoringRules.from_mapping(settings.scoring_rules if settings else None)
     embed = discord.Embed(
-        title="League rules",
+        title="League Rules",
         description=(
-            "Predictions are score-agnostic and lock as a full bracket. "
-            "Knockout scoring gives team-advancement credit even if the path differs."
+            "Pick teams, not scores. Your full bracket locks before the first group "
+            "stage match."
         ),
         color=discord.Color.blurple(),
     )
     if tournament is not None:
         embed.add_field(name="Tournament", value=tournament.tournament_name, inline=False)
     embed.add_field(
-        name="Group stage",
+        name="Group stage points",
         value=(
-            f"Winner {rules.group_winner}, runner-up {rules.group_runner_up}, "
-            f"third-place qualifier {rules.group_third_place_qualifier}"
+            f"Group winner {_format_points(rules.group_winner)}, "
+            f"group runner-up {_format_points(rules.group_runner_up)}, "
+            "advancing third-place team "
+            f"{_format_points(rules.group_third_place_qualifier)}"
         ),
         inline=False,
     )
     embed.add_field(
-        name="Knockout advancement",
+        name="Knockout advancement points",
         value=(
-            f"R32 {rules.round_of_32_advancement}, "
-            f"R16 {rules.round_of_16_advancement}, "
-            f"QF {rules.quarter_final_advancement}, "
-            f"SF {rules.semi_final_advancement}, "
-            f"Final {rules.final_advancement}"
+            "Awarded if a predicted team reaches the specified round, even if it "
+            "gets there by a different path.\n"
+            f"Ro32 {_format_points(rules.round_of_32_advancement)}, "
+            f"Ro16 {_format_points(rules.round_of_16_advancement)}, "
+            f"QF {_format_points(rules.quarter_final_advancement)}, "
+            f"SF {_format_points(rules.semi_final_advancement)}, "
+            f"F {_format_points(rules.final_advancement)}"
         ),
         inline=False,
     )
     embed.add_field(
-        name="Placements",
+        name="Exact placement points",
         value=(
-            f"Third place {rules.third_place_winner}, "
-            f"champion {rules.champion}, runner-up {rules.runner_up}"
+            f"Champion {_format_points(rules.champion)}, "
+            f"runner-up {_format_points(rules.runner_up)}, "
+            f"third-place {_format_points(rules.third_place_winner)}"
         ),
         inline=False,
     )
@@ -1306,7 +1320,7 @@ def _rules_embed(*, settings: object, tournament: object) -> discord.Embed:
 
 
 def _lock_embed(*, settings: object, tournament: object | None = None) -> discord.Embed:
-    embed = discord.Embed(title="Prediction lock", color=discord.Color.gold())
+    embed = discord.Embed(title="Prediction Lock", color=discord.Color.gold())
     embed.add_field(
         name="Status",
         value="Open" if settings and settings.predictions_open else "Closed",
@@ -1330,7 +1344,7 @@ def _lock_embed(*, settings: object, tournament: object | None = None) -> discor
 def _reminder_embed(*, settings: object, tournament: object) -> discord.Embed:
     predictions_open = bool(settings and settings.predictions_open)
     embed = discord.Embed(
-        title="Prediction reminder",
+        title="Prediction Reminder",
         description=(
             "World Cup predictions are open. Submit or edit your bracket before the lock."
             if predictions_open

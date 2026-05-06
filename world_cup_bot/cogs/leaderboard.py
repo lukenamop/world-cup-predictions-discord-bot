@@ -249,7 +249,7 @@ def _points_embed(ranked: RankedScore) -> discord.Embed:
     knockout = score.breakdown.get("knockout", {})
     placements = knockout.get("placements", {}) if isinstance(knockout, dict) else {}
     embed = _rank_embed(ranked)
-    embed.title = f"Point breakdown: {score.display_name}"
+    embed.title = f"Point Breakdown: {score.display_name}"
     embed.add_field(
         name="Third-place hits",
         value=", ".join(groups.get("third_place_qualifier_hits", [])) or "None yet",

@@ -14,7 +14,7 @@ class FoundationCog(commands.Cog):
     @discord.slash_command(name="help", description="Show bot status and help.")
     async def help_command(self, ctx: discord.ApplicationContext) -> None:
         embed = discord.Embed(
-            title="World Cup predictions",
+            title="World Cup Predictions",
             description=(
                 "The bot is online. Admins can configure a league and open "
                 "prediction entry; members can complete private sessions and submit "

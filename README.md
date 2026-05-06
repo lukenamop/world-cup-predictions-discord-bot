@@ -191,7 +191,7 @@ Manual recalculation without fetching new provider data:
 /admin recalc
 ```
 
-Scoring uses the MVP defaults from `PRODUCT-SPEC.md`: group winner 3, group runner-up 2, third-place qualifier 1, Round of 32 1, Round of 16 2, quarter-final 5, semi-final 10, final 15, third-place winner 10, champion 25, and runner-up 15. Admins can adjust those values with `/admin config`. Group winner/runner-up and best-third points are awarded only after the relevant group stage data is complete. Knockout points are team-advancement based: a user gets credit when a predicted team reaches the scored round, even if the exact path differs.
+Scoring uses the MVP defaults from `PRODUCT-SPEC.md`: group winner +3, group runner-up +2, advancing third-place team +1, Ro32 +1, Ro16 +2, QF +5, SF +10, F +15, champion +25, runner-up +15, and third-place +10. Admins can adjust those values with `/admin config`. Group winner/runner-up and best-third points are awarded only after the relevant group stage data is complete. Knockout advancement points are team-based: a user gets credit when a predicted team reaches the scored round, even if the exact path differs.
 
 Official group standings use the 2026 FIFA tie-breaker order: head-to-head points, head-to-head goal difference, head-to-head goals scored, overall goal difference, overall goals scored, team conduct score, then the most recent FIFA/Coca-Cola Men's World Ranking. Best third-place ranking uses points, goal difference, goals scored, team conduct score, then FIFA ranking. If stored results cannot resolve a required tie from deterministic match data, recalculation fails loudly until an operator records the official adjudication:
 

@@ -560,7 +560,7 @@ def _display_name(author: object) -> str:
 
 def _prediction_summary_embed(snapshot: PredictionSnapshot) -> discord.Embed:
     embed = discord.Embed(
-        title=f"{snapshot.display_name}'s prediction",
+        title=f"{snapshot.display_name}'s Prediction",
         description="\n".join(public_prediction_lines(snapshot)),
         color=discord.Color.blurple(),
     )

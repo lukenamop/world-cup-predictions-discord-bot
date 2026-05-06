@@ -336,7 +336,7 @@ def next_prediction_step(
             position = len(ranking) + 1
             return PredictionStep(
                 kind="group_pick",
-                title=f"{group.label}: pick #{position}",
+                title=f"{group.label}: Pick #{position}",
                 description="Rank this group from first through last.",
                 options=options,
                 group_id=group.id,
@@ -350,7 +350,7 @@ def next_prediction_step(
         )
         return PredictionStep(
             kind="third_place",
-            title="Pick advancing third-place teams",
+            title="Pick Advancing Third-Place Teams",
             description=f"Choose {model.format.third_place_qualifiers} of your predicted third-place teams.",
             options=options,
             min_values=model.format.third_place_qualifiers,
@@ -373,7 +373,7 @@ def next_prediction_step(
 
     return PredictionStep(
         kind="submit",
-        title="Ready to submit",
+        title="Ready to Submit",
         description="Review the summary and submit when it looks right.",
         options=(),
     )
