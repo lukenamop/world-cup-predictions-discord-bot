@@ -33,6 +33,7 @@ DEFAULT_PRIVACY_DEFAULTS = {"share_full_bracket": False}
 LOCK_MODE = "full_bracket_lock"
 POST_KIND_CHOICES = ["leaderboard", "rules", "lock"]
 POST_KIND_SET = set(POST_KIND_CHOICES)
+LOCK_POST_NEXT_STEP = "Post the public notice with `/admin post kind: lock`."
 
 
 @dataclass(frozen=True)
@@ -557,7 +558,8 @@ class AdminCog(commands.Cog):
             (
                 "Prediction entry is open. "
                 "Lock deadline: "
-                f"{_format_lock_deadline(settings.lock_deadline_utc, tournament=tournament)}."
+                f"{_format_lock_deadline(settings.lock_deadline_utc, tournament=tournament)}. "
+                f"{LOCK_POST_NEXT_STEP}"
             ),
             ephemeral=True,
         )
@@ -579,7 +581,13 @@ class AdminCog(commands.Cog):
             action="predictions_closed",
             details={"predictions_open": False},
         )
-        await ctx.respond("Prediction entry is closed.", ephemeral=True)
+        await ctx.respond(
+            (
+                "Prediction entry is closed. "
+                f"{LOCK_POST_NEXT_STEP}"
+            ),
+            ephemeral=True,
+        )
 
     @admin.command(
         name="lock",
@@ -648,7 +656,8 @@ class AdminCog(commands.Cog):
         ).get_active_config(guild_id)
         await ctx.respond(
             "Prediction lock deadline: "
-            f"{_format_lock_deadline(settings.lock_deadline_utc, tournament=tournament)}.",
+            f"{_format_lock_deadline(settings.lock_deadline_utc, tournament=tournament)}. "
+            f"{LOCK_POST_NEXT_STEP}",
             ephemeral=True,
         )
 
@@ -1198,17 +1207,7 @@ def _status_embed(
         name="Tournament",
         value=(
             f"{tournament.tournament_name}\n"
-            f"`{tournament.tournament_id}` / schema `{tournament.schema_version}`"
-            if tournament is not None
-            else "Not imported"
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="Data",
-        value=(
-            f"Hash `{tournament.config_hash[:12]}`\n"
-            f"Imported {discord_datetime(tournament.imported_at)}"
+            f"Config `{tournament.tournament_id}`, version `{tournament.config_hash[:12]}`"
             if tournament is not None
             else "Run `/admin setup` to attach the canonical 2026 World Cup data."
         ),

@@ -269,6 +269,33 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
         self.assertIn("Exact placement points", value)
         self.assertIn("Champion +25, runner-up +15, third-place +10", value)
 
+    def test_status_embed_uses_admin_friendly_tournament_copy(self) -> None:
+        admin_module = _load_admin_module_with_fake_discord()
+        settings = types.SimpleNamespace(
+            predictions_open=True,
+            lock_deadline_utc=datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc),
+            announcement_channel_id="111",
+            leaderboard_channel_id="222",
+            privacy_defaults={"share_full_bracket": False},
+        )
+        tournament = types.SimpleNamespace(
+            tournament_id="fifa-world-cup-2026",
+            tournament_name="FIFA World Cup 2026",
+            config_hash="3b3023f182d9abcdef",
+        )
+
+        embed = admin_module._status_embed(
+            settings=settings,
+            tournament=tournament,
+            command_sync_status="Synced",
+        )
+
+        self.assertEqual(
+            _field_value(embed, "Tournament"),
+            "FIFA World Cup 2026\nConfig `fifa-world-cup-2026`, version `3b3023f182d9`",
+        )
+        self.assertNotIn("Data", [field.name for field in embed.fields])
+
     def test_rules_embed_uses_public_scoring_copy(self) -> None:
         admin_module = _load_admin_module_with_fake_discord()
         settings = admin_module.GuildSettings(

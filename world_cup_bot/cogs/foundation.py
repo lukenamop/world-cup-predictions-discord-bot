@@ -22,7 +22,11 @@ class FoundationCog(commands.Cog):
             ),
             color=discord.Color.blurple(),
         )
-        embed.add_field(name="Status", value="Prediction entry ready", inline=True)
+        embed.add_field(
+            name="Status",
+            value="Use `/admin setup` to configure a league.",
+            inline=True,
+        )
         embed.add_field(
             name="Privacy",
             value="Prediction flows are private.",
