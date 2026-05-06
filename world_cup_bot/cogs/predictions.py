@@ -9,10 +9,13 @@ from discord.ext import commands
 
 from world_cup_bot.domain.predictions import (
     Group,
+    ROUND_LABELS,
     PredictionStep,
     PredictionValidationError,
+    RoundMatch,
     TournamentModel,
     empty_prediction_data,
+    get_round_matches,
     next_prediction_step,
     prediction_progress,
     prediction_summary,
@@ -279,12 +282,17 @@ class PredictionEntrySession:
 
 
 class PredictionEntryView(discord.ui.View):
+    REVIEW_KNOCKOUT_ROUNDS = frozenset(
+        {"round_of_32", "round_of_16", "quarter_finals", "semi_finals"}
+    )
+
     def __init__(self, session: PredictionEntrySession) -> None:
         super().__init__(timeout=15 * 60)
         self.session = session
         self.notice: str | None = None
         self.pending_values: list[str] = []
         self.review_group_id: str | None = None
+        self.review_round_name: str | None = None
         self.finished = False
         self.cancelled = False
         self._refresh_items()
@@ -295,13 +303,16 @@ class PredictionEntryView(discord.ui.View):
 
         model = self.session.model
         review_group = self._review_group()
+        review_round_name = self._review_round_name()
         step = next_prediction_step(model, self.session.data)
         progress = prediction_progress(model, self.session.data)
         embed = discord.Embed(
-            title=f"{review_group.label} Complete" if review_group else step.title,
+            title=_review_title(review_group, review_round_name) or step.title,
             description=(
                 "Review this group ranking, then continue."
                 if review_group
+                else "Review this knockout round, then continue."
+                if review_round_name
                 else step.description
             ),
             color=discord.Color.blurple(),
@@ -330,6 +341,8 @@ class PredictionEntryView(discord.ui.View):
                 value=_format_group_ranking(model, self.session.data, review_group.id),
                 inline=False,
             )
+        elif review_round_name:
+            _add_knockout_recap_fields(embed, model, self.session.data, review_round_name)
         elif step.kind == "group_pick" and step.group_id:
             embed.add_field(
                 name="Current group ranking",
@@ -348,7 +361,12 @@ class PredictionEntryView(discord.ui.View):
                 value="\n".join(team.short_name for team in step.options)[:1024],
                 inline=False,
             )
-        if not review_group and step.kind != "submit" and self.pending_values:
+        if (
+            not review_group
+            and not review_round_name
+            and step.kind != "submit"
+            and self.pending_values
+        ):
             embed.add_field(
                 name="Pending selection",
                 value=_format_pending_selection(step, self.pending_values),
@@ -370,9 +388,10 @@ class PredictionEntryView(discord.ui.View):
         if self.finished:
             return
         review_group = self._review_group()
+        review_round_name = self._review_round_name()
         step = next_prediction_step(self.session.model, self.session.data)
         progress = prediction_progress(self.session.model, self.session.data)
-        if not review_group and step.kind != "submit":
+        if not review_group and not review_round_name and step.kind != "submit":
             select = discord.ui.Select(
                 placeholder=step.title[:100],
                 min_values=step.min_values,
@@ -402,23 +421,25 @@ class PredictionEntryView(discord.ui.View):
         previous_button.callback = self._previous_callback
         self.add_item(previous_button)
 
-        if review_group:
-            next_group_button = discord.ui.Button(
+        if review_group or review_round_name:
+            next_review_button = discord.ui.Button(
                 label="Next group" if step.kind == "group_pick" else "Next",
                 style=discord.ButtonStyle.primary,
                 row=1,
             )
-            next_group_button.callback = self._next_group_callback
-            self.add_item(next_group_button)
+            next_review_button.callback = self._next_group_callback
+            self.add_item(next_review_button)
 
-            reset_group_button = discord.ui.Button(
-                label="Reset group",
+            reset_button = discord.ui.Button(
+                label="Reset group" if review_group else "Reset round",
                 style=discord.ButtonStyle.secondary,
                 row=1,
             )
-            reset_group_button.callback = self._reset_group_callback
-            self.add_item(reset_group_button)
-        elif step.kind not in {"group_pick", "submit"}:
+            reset_button.callback = (
+                self._reset_group_callback if review_group else self._reset_round_callback
+            )
+            self.add_item(reset_button)
+        elif step.kind == "third_place":
             next_button = discord.ui.Button(
                 label="Next",
                 style=discord.ButtonStyle.primary,
@@ -430,7 +451,7 @@ class PredictionEntryView(discord.ui.View):
 
         cancel_button = discord.ui.Button(
             label="Cancel",
-            style=discord.ButtonStyle.secondary,
+            style=discord.ButtonStyle.danger,
             row=1,
         )
         cancel_button.callback = self._cancel_entry_callback
@@ -462,6 +483,7 @@ class PredictionEntryView(discord.ui.View):
 
     async def _next_group_callback(self, interaction: discord.Interaction) -> None:
         self.review_group_id = None
+        self.review_round_name = None
         self.notice = None
         await self._edit(interaction)
 
@@ -480,7 +502,29 @@ class PredictionEntryView(discord.ui.View):
                 )
             self.pending_values = []
             self.review_group_id = None
+            self.review_round_name = None
             self.notice = f"{group.label} reset. Rank it again."
+        except PredictionValidationError as exc:
+            self.notice = str(exc)
+        await self._edit(interaction)
+
+    async def _reset_round_callback(self, interaction: discord.Interaction) -> None:
+        round_name = self._review_round_name()
+        if round_name is None:
+            self.notice = "There is no completed knockout round to reset."
+            await self._edit(interaction)
+            return
+
+        try:
+            for _ in range(len(self._round_entries(round_name))):
+                self.session.data = undo_last_prediction_step(
+                    self.session.model,
+                    self.session.data,
+                )
+            self.pending_values = []
+            self.review_group_id = None
+            self.review_round_name = None
+            self.notice = f"{ROUND_LABELS[round_name]} reset. Pick it again."
         except PredictionValidationError as exc:
             self.notice = str(exc)
         await self._edit(interaction)
@@ -502,6 +546,7 @@ class PredictionEntryView(discord.ui.View):
     async def _previous_callback(self, interaction: discord.Interaction) -> None:
         self.pending_values = []
         self.review_group_id = None
+        self.review_round_name = None
         try:
             self.session.data = undo_last_prediction_step(
                 self.session.model,
@@ -515,6 +560,7 @@ class PredictionEntryView(discord.ui.View):
     async def _cancel_entry_callback(self, interaction: discord.Interaction) -> None:
         self.pending_values = []
         self.review_group_id = None
+        self.review_round_name = None
         self.notice = "Prediction entry cancelled. No changes were submitted."
         self.finished = True
         self.cancelled = True
@@ -560,6 +606,7 @@ class PredictionEntryView(discord.ui.View):
         if step.kind == "group_pick":
             self.session.data = self._apply_step(step, values)
             self.pending_values = []
+            self.review_round_name = None
             if step.group_id and self._is_group_complete(step.group_id):
                 self.review_group_id = step.group_id
                 self.notice = "Group ranking complete."
@@ -568,7 +615,20 @@ class PredictionEntryView(discord.ui.View):
                 self.notice = "Selection recorded."
             return
 
+        if step.kind == "knockout":
+            self.session.data = self._apply_step(step, values)
+            self.pending_values = []
+            self.review_group_id = None
+            if step.round_name and self._should_review_round(step.round_name):
+                self.review_round_name = step.round_name
+                self.notice = f"{ROUND_LABELS[step.round_name]} complete."
+            else:
+                self.review_round_name = None
+                self.notice = "Selection recorded."
+            return
+
         self.review_group_id = None
+        self.review_round_name = None
         self.pending_values = values
         self.notice = "Selection ready. Press Next to record it."
 
@@ -581,15 +641,39 @@ class PredictionEntryView(discord.ui.View):
             return None
         return group
 
+    def _review_round_name(self) -> str | None:
+        round_name = self.review_round_name
+        if round_name is None:
+            return None
+        if not self._should_review_round(round_name):
+            self.review_round_name = None
+            return None
+        return round_name
+
     def _is_group_complete(self, group_id: str) -> bool:
         return len(self._group_ranking(group_id)) >= len(
             self.session.model.groups_by_id[group_id].team_ids
         )
 
+    def _should_review_round(self, round_name: str) -> bool:
+        return (
+            round_name in self.REVIEW_KNOCKOUT_ROUNDS
+            and self._is_knockout_round_complete(round_name)
+        )
+
+    def _is_knockout_round_complete(self, round_name: str) -> bool:
+        matches = get_round_matches(self.session.model, self.session.data, round_name)
+        return bool(matches) and all(match.winner_team_id for match in matches)
+
     def _group_ranking(self, group_id: str) -> list[str]:
         rankings = self.session.data.get("group_rankings", {})
         ranking = rankings.get(group_id, []) if isinstance(rankings, dict) else []
         return [str(team_id) for team_id in ranking]
+
+    def _round_entries(self, round_name: str) -> list[dict[str, Any]]:
+        knockout = self.session.data.get("knockout", {})
+        entries = knockout.get(round_name, []) if isinstance(knockout, dict) else []
+        return [entry for entry in entries if isinstance(entry, dict)]
 
     def _apply_step(self, step: PredictionStep, values: list[str]) -> dict[str, Any]:
         if step.kind == "group_pick":
@@ -633,6 +717,65 @@ def _format_group_ranking(
         f"{index}. {model.team(str(team_id)).short_name}"
         for index, team_id in enumerate(ranking, start=1)
     )
+
+
+def _review_title(group: Group | None, round_name: str | None) -> str | None:
+    if group is not None:
+        return f"{group.label} Complete"
+    if round_name is not None:
+        return f"{ROUND_LABELS[round_name]} Complete"
+    return None
+
+
+def _add_knockout_recap_fields(
+    embed: discord.Embed,
+    model: TournamentModel,
+    data: dict[str, Any],
+    round_name: str,
+) -> None:
+    label = ROUND_LABELS[round_name]
+    lines = [
+        _format_knockout_match(model, index, match)
+        for index, match in enumerate(get_round_matches(model, data, round_name), start=1)
+    ]
+    if not lines:
+        embed.add_field(name=label, value="No picks recorded yet.", inline=False)
+        return
+
+    for index, chunk in enumerate(_chunk_field_lines(lines), start=1):
+        name = label if index == 1 else f"{label} continued"
+        embed.add_field(name=name, value=chunk, inline=False)
+
+
+def _format_knockout_match(model: TournamentModel, index: int, match: RoundMatch) -> str:
+    home_team_id = match.home_team_id
+    away_team_id = match.away_team_id
+    winner_team_id = match.winner_team_id
+    home = model.team(home_team_id).short_name
+    away = model.team(away_team_id).short_name
+    if winner_team_id is None:
+        return f"{index}. {home} vs {away}"
+    winner = model.team(str(winner_team_id)).short_name
+    loser = away if str(winner_team_id) == home_team_id else home
+    return f"{index}. {winner} def. {loser}"
+
+
+def _chunk_field_lines(lines: list[str]) -> list[str]:
+    chunks: list[str] = []
+    current: list[str] = []
+    current_length = 0
+    for line in lines:
+        line = line[:1024]
+        separator = 1 if current else 0
+        if current and current_length + separator + len(line) > 1024:
+            chunks.append("\n".join(current))
+            current = []
+            current_length = 0
+        current.append(line)
+        current_length += separator + len(line)
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
 
 
 def _format_summary(model: TournamentModel, data: dict[str, Any]) -> str:

@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import unittest
 
+import discord
+
 from world_cup_bot.data.repositories import ActiveTournamentConfig, GuildSettings, PredictionEntry
 from world_cup_bot.domain.locks import effective_lock_deadline, is_prediction_locked
 from world_cup_bot.domain.predictions import (
     TournamentModel,
     empty_prediction_data,
+    get_round_matches,
     is_submission_complete,
     next_prediction_step,
     prediction_summary,
@@ -282,6 +285,8 @@ class PredictionEntryViewTests(unittest.IsolatedAsyncioTestCase):
         }
         interaction = _FakeInteraction()
 
+        self.assertEqual(button_by_label["Cancel"].style, discord.ButtonStyle.danger)
+
         await button_by_label["Cancel"].callback(interaction)
 
         self.assertTrue(view.finished)
@@ -293,6 +298,81 @@ class PredictionEntryViewTests(unittest.IsolatedAsyncioTestCase):
         fields = {field.name: field.value for field in interaction.response.embed.fields}
         self.assertEqual(fields["Next step"], "Run `/predict` again to start over.")
         self.assertNotIn("Current group ranking", fields)
+
+    async def test_knockout_selection_records_immediately(self) -> None:
+        view = _prediction_entry_view()
+        _advance_view_to_knockout_round(view, "round_of_32")
+        step = next_prediction_step(view.session.model, view.session.data)
+
+        view._stage_or_apply_selection(step, [step.options[0].id])
+
+        self.assertEqual(view.pending_values, [])
+        self.assertIsNone(view.review_round_name)
+        self.assertEqual(view.notice, "Selection recorded.")
+        self.assertEqual(view.session.data["knockout"]["round_of_32"][0]["winner_team_id"], "A1")
+
+        fields = {field.name: field.value for field in view.build_embed().fields}
+        self.assertNotIn("Pending selection", fields)
+
+        view._refresh_items()
+        labels = [
+            item.label
+            for item in view.children
+            if getattr(item, "label", None) is not None
+        ]
+        self.assertNotIn("Next", labels)
+
+    async def test_completed_knockout_round_waits_for_recap(self) -> None:
+        view = _prediction_entry_view()
+        step = _advance_view_to_final_pick_of_round(view, "round_of_32")
+
+        view._stage_or_apply_selection(step, [step.options[0].id])
+
+        self.assertEqual(view.review_round_name, "round_of_32")
+        self.assertEqual(view.notice, "Round of 32 complete.")
+
+        embed = view.build_embed()
+        self.assertEqual(embed.title, "Round of 32 Complete")
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn("1. Team A1 def. Team A2", fields["Round of 32"])
+        self.assertIn("16. Team G3 def. Team H3", "\n".join(fields.values()))
+        self.assertNotIn("Choices", fields)
+        self.assertNotIn("Pending selection", fields)
+
+        view._refresh_items()
+        labels = [
+            item.label
+            for item in view.children
+            if getattr(item, "label", None) is not None
+        ]
+        self.assertIn("Next", labels)
+        self.assertIn("Reset round", labels)
+        self.assertFalse(any(getattr(item, "options", None) for item in view.children))
+
+    async def test_next_from_knockout_recap_advances_to_next_round(self) -> None:
+        view = _prediction_entry_view()
+        step = _advance_view_to_final_pick_of_round(view, "round_of_32")
+        view._stage_or_apply_selection(step, [step.options[0].id])
+        interaction = _FakeInteraction()
+
+        await view._next_group_callback(interaction)
+
+        self.assertIsNone(view.review_round_name)
+        self.assertIsNone(view.notice)
+        self.assertEqual(interaction.response.embed.title, "Round of 16: Team A1 vs Team B1")
+
+    async def test_reset_round_removes_completed_knockout_round(self) -> None:
+        view = _prediction_entry_view()
+        step = _advance_view_to_final_pick_of_round(view, "round_of_32")
+        view._stage_or_apply_selection(step, [step.options[0].id])
+        interaction = _FakeInteraction()
+
+        await view._reset_round_callback(interaction)
+
+        self.assertIsNone(view.review_round_name)
+        self.assertNotIn("round_of_32", view.session.data["knockout"])
+        self.assertEqual(view.notice, "Round of 32 reset. Pick it again.")
+        self.assertEqual(interaction.response.embed.title, "Round of 32: Team A1 vs Team A2")
 
 
 class PredictionFlowTests(unittest.TestCase):
@@ -528,6 +608,39 @@ def _complete_current_group(view: PredictionEntryView) -> None:
     for _ in range(view.session.model.format.teams_per_group):
         step = next_prediction_step(view.session.model, view.session.data)
         view._stage_or_apply_selection(step, [step.options[0].id])
+
+
+def _advance_view_to_knockout_round(view: PredictionEntryView, round_name: str) -> None:
+    while True:
+        step = next_prediction_step(view.session.model, view.session.data)
+        if step.kind == "knockout" and step.round_name == round_name:
+            view.pending_values = []
+            view.review_group_id = None
+            view.review_round_name = None
+            view.notice = None
+            return
+        if step.kind == "submit":
+            raise AssertionError(f"Reached submit before {round_name}")
+        view.session.data = view._apply_step(
+            step,
+            [team.id for team in step.options[: step.max_values]],
+        )
+
+
+def _advance_view_to_final_pick_of_round(
+    view: PredictionEntryView,
+    round_name: str,
+) -> PredictionStep:
+    _advance_view_to_knockout_round(view, round_name)
+    while True:
+        step = next_prediction_step(view.session.model, view.session.data)
+        if step.kind != "knockout" or step.round_name != round_name:
+            raise AssertionError(f"Reached {step.kind} before final {round_name} pick")
+        matches = get_round_matches(view.session.model, view.session.data, round_name)
+        remaining = [match for match in matches if match.winner_team_id is None]
+        if len(remaining) == 1:
+            return step
+        view.session.data = view._apply_step(step, [step.options[0].id])
 
 
 class _FakeResponse:
