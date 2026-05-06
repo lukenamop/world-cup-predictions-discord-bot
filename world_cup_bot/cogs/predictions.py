@@ -385,7 +385,7 @@ class PredictionEntryView(discord.ui.View):
         previous_button.callback = self._previous_callback
         self.add_item(previous_button)
 
-        if step.kind != "submit":
+        if step.kind not in {"group_pick", "submit"}:
             next_button = discord.ui.Button(
                 label="Next",
                 style=discord.ButtonStyle.primary,
@@ -425,8 +425,14 @@ class PredictionEntryView(discord.ui.View):
         interaction: discord.Interaction,
         select: discord.ui.Select,
     ) -> None:
-        self.pending_values = [str(value) for value in select.values]
-        self.notice = "Selection ready. Press Next to record it."
+        step = next_prediction_step(self.session.model, self.session.data)
+        try:
+            self._stage_or_apply_selection(
+                step,
+                [str(value) for value in select.values],
+            )
+        except PredictionValidationError as exc:
+            self.notice = str(exc)
         await self._edit(interaction)
 
     async def _next_callback(self, interaction: discord.Interaction) -> None:
@@ -484,6 +490,16 @@ class PredictionEntryView(discord.ui.View):
     async def _edit(self, interaction: discord.Interaction) -> None:
         self._refresh_items()
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    def _stage_or_apply_selection(self, step: PredictionStep, values: list[str]) -> None:
+        if step.kind == "group_pick":
+            self.session.data = self._apply_step(step, values)
+            self.pending_values = []
+            self.notice = "Selection recorded."
+            return
+
+        self.pending_values = values
+        self.notice = "Selection ready. Press Next to record it."
 
     def _apply_step(self, step: PredictionStep, values: list[str]) -> dict[str, Any]:
         if step.kind == "group_pick":

@@ -21,6 +21,7 @@ from world_cup_bot.services.prediction_service import (
     PredictionServiceError,
     PredictionSessionState,
 )
+from world_cup_bot.cogs.predictions import PredictionEntrySession, PredictionEntryView
 
 
 class PredictionServiceWriteValidationTests(unittest.IsolatedAsyncioTestCase):
@@ -184,6 +185,31 @@ class PredictionServiceWriteValidationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(predictions.submit_calls, 1)
+
+
+class PredictionEntryViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_group_selection_records_immediately_in_ranking(self) -> None:
+        view = _prediction_entry_view()
+        step = next_prediction_step(view.session.model, view.session.data)
+
+        view._stage_or_apply_selection(step, [step.options[0].id])
+
+        self.assertEqual(view.session.data["group_rankings"], {"A": ["A1"]})
+        self.assertEqual(view.pending_values, [])
+        self.assertEqual(view.notice, "Selection recorded.")
+
+        fields = {field.name: field.value for field in view.build_embed().fields}
+        self.assertIn("1. Team A1", fields["Current group ranking"])
+        self.assertNotIn("Pending selection", fields)
+
+        view._refresh_items()
+        button_by_label = {
+            item.label: item
+            for item in view.children
+            if getattr(item, "label", None) is not None
+        }
+        self.assertFalse(button_by_label["Previous"].disabled)
+        self.assertNotIn("Next", button_by_label)
 
 
 class PredictionFlowTests(unittest.TestCase):
@@ -399,6 +425,19 @@ def _session_state(tournament: ActiveTournamentConfig) -> PredictionSessionState
         data=empty_prediction_data(),
         lock_deadline_utc=None,
         edit_existing=False,
+    )
+
+
+def _prediction_entry_view() -> PredictionEntryView:
+    tournament = _active_tournament(1)
+    return PredictionEntryView(
+        PredictionEntrySession(
+            service=PredictionService(pool=None),
+            state=_session_state(tournament),
+            user_id="user-1",
+            display_name="User One",
+            data=empty_prediction_data(),
+        )
     )
 
 
