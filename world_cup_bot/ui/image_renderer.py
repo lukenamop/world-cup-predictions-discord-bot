@@ -50,7 +50,7 @@ def render_groups_png(model: GroupSheetRenderModel) -> bytes:
     fonts = _fonts()
     section_width = _group_section_width(model, fonts)
     section_height = 250
-    width = max(1800, margin + columns * section_width + (columns - 1) * gap + 6)
+    width = max(1800, margin + columns * section_width + (columns - 1) * gap + margin)
     rows = max(1, (len(model.groups) + columns - 1) // columns)
     height = header_height + rows * section_height + (rows - 1) * gap + margin
     image = Image.new("RGB", (width, height), BACKGROUND)

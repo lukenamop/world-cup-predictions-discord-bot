@@ -350,7 +350,7 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         image = Image.open(BytesIO(render_groups_png(render_model))).convert("RGB")
 
-        self.assertEqual(image.size, (1800, 448))
+        self.assertEqual(image.size, (1842, 474))
         self.assertNotEqual(image.getpixel((110, 220)), (32, 38, 49))
 
     def test_bracket_renderer_fits_long_callout_team_names(self) -> None:
