@@ -29,18 +29,18 @@ FLAG_DIR = Path(__file__).resolve().parents[2] / "assets" / "flags"
 
 
 def render_groups_png(model: GroupSheetRenderModel) -> bytes:
-    width = 1800
-    section_width = 420
-    section_height = 250
     margin = 48
     gap = 22
     header_height = 150
     columns = 4
+    fonts = _fonts()
+    section_width = _group_section_width(model, fonts)
+    section_height = 250
+    width = max(1800, margin + columns * section_width + (columns - 1) * gap + 6)
     rows = max(1, (len(model.groups) + columns - 1) // columns)
     height = header_height + rows * section_height + (rows - 1) * gap + margin
     image = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(image)
-    fonts = _fonts()
 
     _draw_header(draw, model.title, model.subtitle, model.meta, width, fonts)
     for index, group in enumerate(model.groups):
@@ -74,14 +74,14 @@ def render_groups_png(model: GroupSheetRenderModel) -> bytes:
                 draw,
                 x + 58,
                 line_y,
-                _fit(item.team_name, 14 if badge else 17),
+                item.team_name,
                 item.flag_code,
                 fonts["body"],
             )
             if badge is not None:
                 _pill(
                     draw,
-                    x + 300,
+                    x + section_width - 120,
                     line_y - 3,
                     label,
                     color,
@@ -91,7 +91,7 @@ def render_groups_png(model: GroupSheetRenderModel) -> bytes:
             elif item.status.state != "pending":
                 _pill(
                     draw,
-                    x + 344,
+                    x + section_width - 76,
                     line_y - 3,
                     _status_icon(item.status),
                     _status_color(item.status),
@@ -103,20 +103,20 @@ def render_groups_png(model: GroupSheetRenderModel) -> bytes:
 
 
 def render_bracket_png(model: BracketRenderModel) -> bytes:
-    width = 1900
     margin = 48
     header_height = 150
-    column_width = 190
-    gap = 14
+    gap = 18
     match_height = 60
     match_pitch = 80
     rounds = _rounds(model)
+    fonts = _fonts()
+    column_width = _bracket_column_width(rounds, fonts)
+    width = max(1900, margin * 2 + 9 * column_width + 8 * gap)
     side_slots = max(1, (len(rounds.get("Round of 32", ())) + 1) // 2)
     base_height = header_height + max(8, side_slots) * match_pitch + margin
     height = base_height
     image = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(image)
-    fonts = _fonts()
 
     _draw_header(draw, model.title, model.subtitle, model.meta, width, fonts)
     left_columns = {
@@ -502,7 +502,7 @@ def _draw_bracket_team_row(
         draw,
         x + 13,
         y + 2,
-        _fit(name, 9),
+        name,
         flag_code,
         fonts["small"],
         fill=TEXT if is_winner else MUTED,
@@ -547,6 +547,45 @@ def _group_advancement_badge(row: object) -> tuple[str, str] | None:
     return None
 
 
+def _group_section_width(
+    model: GroupSheetRenderModel,
+    fonts: dict[str, ImageFont.ImageFont],
+) -> int:
+    max_name_width = max(
+        (
+            _text_width(row.team_name, fonts["body"])
+            for group in model.groups
+            for row in group.rows
+        ),
+        default=0,
+    )
+    return max(420, 58 + 36 + max_name_width + 12 + 120 + 14)
+
+
+def _bracket_column_width(
+    rounds: dict[str, list[object]],
+    fonts: dict[str, ImageFont.ImageFont],
+) -> int:
+    max_name_width = max(
+        (
+            _text_width(name, fonts["small"])
+            for matches in rounds.values()
+            for match in matches
+            for name in (
+                getattr(match, "home_team_name"),
+                getattr(match, "away_team_name"),
+            )
+        ),
+        default=0,
+    )
+    return max(230, max_name_width + 108)
+
+
+def _text_width(value: str, font: ImageFont.ImageFont) -> int:
+    left, _, right, _ = font.getbbox(value)
+    return right - left
+
+
 def _draw_header(
     draw: ImageDraw.ImageDraw,
     title: str,
@@ -576,7 +615,42 @@ def _pill(
 ) -> None:
     box = (x, y, x + width, y + height)
     draw.rounded_rectangle(box, radius=radius, fill=color)
-    draw.text((x + width // 2, y + height // 2), label, fill="#ffffff", font=font, anchor="mm")
+    icon = None
+    if "✓" in label:
+        icon = "check"
+        label = label.replace("✓", "").strip()
+    elif "✕" in label:
+        icon = "x"
+        label = label.replace("✕", "").strip()
+    if icon is None:
+        draw.text((x + width // 2, y + height // 2), label, fill="#ffffff", font=font, anchor="mm")
+        return
+
+    if label:
+        draw.text(
+            (x + (width - 22) // 2, y + height // 2),
+            label,
+            fill="#ffffff",
+            font=font,
+            anchor="mm",
+        )
+        icon_x = x + width - 18
+    else:
+        icon_x = x + width // 2
+    _draw_status_icon(draw, icon, icon_x, y + height // 2)
+
+
+def _draw_status_icon(
+    draw: ImageDraw.ImageDraw,
+    icon: str,
+    x: int,
+    y: int,
+) -> None:
+    if icon == "check":
+        draw.line((x - 6, y, x - 2, y + 5, x + 7, y - 6), fill="#ffffff", width=2)
+        return
+    draw.line((x - 5, y - 5, x + 5, y + 5), fill="#ffffff", width=2)
+    draw.line((x + 5, y - 5, x - 5, y + 5), fill="#ffffff", width=2)
 
 
 def _draw_team(

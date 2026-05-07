@@ -308,7 +308,7 @@ def group_sheet_render_model(
         sections.append(GroupRenderSection(label=group.label, rows=tuple(rows)))
 
     return GroupSheetRenderModel(
-        title=f"{snapshot.display_name} groups",
+        title=f"{snapshot.display_name}'s groups",
         subtitle=snapshot.tournament_name,
         meta=_snapshot_meta(snapshot),
         groups=tuple(sections),
@@ -346,7 +346,7 @@ def bracket_render_model(
             )
 
     return BracketRenderModel(
-        title=f"{snapshot.display_name} bracket",
+        title=f"{snapshot.display_name}'s bracket",
         subtitle=snapshot.tournament_name,
         meta=_snapshot_meta(snapshot),
         matches=tuple(matches),
@@ -413,23 +413,12 @@ def _actual_matches(
 
 
 def _snapshot_meta(snapshot: PredictionSnapshot) -> tuple[str, ...]:
-    submitted = (
-        f"Submitted {snapshot.entry.submitted_updated_at:%Y-%m-%d %H:%M UTC}"
-        if snapshot.entry.submitted_updated_at
-        else "Submitted"
-    )
-    lock = (
-        f"Lock {snapshot.lock_deadline_utc:%Y-%m-%d %H:%M UTC}"
-        if snapshot.lock_deadline_utc
-        else "Lock not configured"
-    )
     sync = (
         f"Last sync {snapshot.latest_sync_run.finished_at:%Y-%m-%d %H:%M UTC}"
         if snapshot.latest_sync_run and snapshot.latest_sync_run.finished_at
         else "No completed sync"
     )
-    lock_state = "Locked" if snapshot.is_locked else "Open"
-    return (submitted, lock, lock_state, sync)
+    return (sync,)
 
 
 def _status(
