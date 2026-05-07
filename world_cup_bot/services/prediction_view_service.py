@@ -279,6 +279,9 @@ def group_sheet_render_model(
     predicted_thirds = set(_strings(snapshot.data.get("third_place_qualifier_team_ids")))
     actual_thirds = set(_strings(actual_data.get("third_place_qualifier_team_ids")))
     actual_thirds_ready = bool(actual_thirds)
+    rules = ScoringRules.from_mapping(
+        snapshot.settings.scoring_rules if snapshot.settings else None
+    )
 
     sections: list[GroupRenderSection] = []
     for group in snapshot.model.groups:
@@ -291,6 +294,7 @@ def group_sheet_render_model(
                 expected=team_id,
                 actual=actual_team_id,
                 pending=actual_team_id is None,
+                correct_label=f"+{_group_pick_points(index, rules)}",
             )
             third_status = None
             if index == 3 and team_id in predicted_thirds:
@@ -298,8 +302,7 @@ def group_sheet_render_model(
                     expected=team_id,
                     actual=team_id if team_id in actual_thirds else None,
                     pending=not actual_thirds_ready,
-                    correct_label="3P OK",
-                    incorrect_label="3P X",
+                    correct_label=f"+{rules.group_third_place_qualifier}",
                 )
             rows.append(
                 GroupRenderRow(
@@ -638,6 +641,14 @@ def _actual_matches(
 
 def _snapshot_meta(snapshot: PredictionSnapshot) -> tuple[str, ...]:
     return ()
+
+
+def _group_pick_points(position: int, rules: ScoringRules) -> int:
+    if position == 1:
+        return rules.group_winner
+    if position == 2:
+        return rules.group_runner_up
+    return 0
 
 
 def _status(

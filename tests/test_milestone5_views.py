@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timezone
 import unittest
 
@@ -66,9 +67,36 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(render_model.meta, ())
         group_a = render_model.groups[0]
         self.assertEqual(group_a.rows[0].status.state, "correct")
+        self.assertEqual(group_a.rows[0].status.label, "+3")
         self.assertEqual(group_a.rows[0].flag_code, "A1")
         self.assertEqual(group_a.rows[1].status.state, "correct")
+        self.assertEqual(group_a.rows[1].status.label, "+2")
         self.assertEqual(group_a.rows[2].third_place_status.state, "pending")
+
+    def test_group_render_model_uses_configured_scoring_labels(self) -> None:
+        snapshot = replace(
+            _snapshot(),
+            settings=GuildSettings(
+                guild_id="guild-1",
+                timezone="UTC",
+                live_results_provider="fifa_public_calendar",
+                lock_deadline_utc=None,
+                predictions_open=True,
+                scoring_rules={
+                    "group_winner": 7,
+                    "group_runner_up": 4,
+                    "group_third_place_qualifier": 2,
+                },
+            ),
+        )
+        actual_data = snapshot.data
+
+        render_model = group_sheet_render_model(snapshot, actual_data)
+
+        group_a = render_model.groups[0]
+        self.assertEqual(group_a.rows[0].status.label, "+7")
+        self.assertEqual(group_a.rows[1].status.label, "+4")
+        self.assertEqual(group_a.rows[2].third_place_status.label, "+2")
 
     def test_bracket_render_model_marks_advancement_when_path_differs(self) -> None:
         snapshot = _snapshot()
@@ -181,6 +209,22 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(bracket_png.startswith(b"\x89PNG"))
         bracket_image = Image.open(BytesIO(bracket_png))
         self.assertLessEqual(bracket_image.size[0], 2054)
+
+    def test_group_status_x_icon_matches_bracket_x_icon(self) -> None:
+        if not PIL_AVAILABLE:
+            self.skipTest("Pillow is not installed in this Python environment.")
+
+        from PIL import Image, ImageDraw
+
+        from world_cup_bot.ui import image_renderer
+
+        group_icon = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+        bracket_icon = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+
+        image_renderer._draw_status_icon(ImageDraw.Draw(group_icon), "x", 16, 16)
+        image_renderer._draw_x_icon(ImageDraw.Draw(bracket_icon), 16, 16)
+
+        self.assertEqual(group_icon.tobytes(), bracket_icon.tobytes())
 
     def test_bracket_renderer_sizes_long_names_per_column(self) -> None:
         if not PIL_AVAILABLE:

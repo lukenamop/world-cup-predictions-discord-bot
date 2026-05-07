@@ -35,12 +35,18 @@ FONT_PATH = (
 BRACKET_COMPACT_OVERLAP = 46
 BRACKET_BADGE_WIDTH = 34
 BRACKET_BADGE_GAP = 10
+GROUP_ROW_HEIGHT = 40
+GROUP_FULL_BADGE_WIDTH = 92
+GROUP_ICON_BADGE_WIDTH = 48
+GROUP_BADGE_RIGHT_PADDING = 28
+GROUP_BADGE_GAP = 14
 
 
 def render_groups_png(model: GroupSheetRenderModel) -> bytes:
     margin = 48
     gap = 22
-    header_height = 150
+    header_height = 176
+    header_divider_y = 158
     columns = 4
     fonts = _fonts()
     section_width = _group_section_width(model, fonts)
@@ -51,7 +57,16 @@ def render_groups_png(model: GroupSheetRenderModel) -> bytes:
     image = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(image)
 
-    _draw_header(draw, model.title, model.subtitle, model.meta, width, fonts)
+    _draw_header(
+        draw,
+        model.title,
+        model.subtitle,
+        model.meta,
+        width,
+        fonts,
+        divider_y=header_divider_y,
+    )
+    _draw_group_legend(draw, width, fonts)
     for index, group in enumerate(model.groups):
         column = index % columns
         row = index // columns
@@ -59,54 +74,23 @@ def render_groups_png(model: GroupSheetRenderModel) -> bytes:
         y = header_height + row * (section_height + gap)
         _rounded_rect(draw, (x, y, x + section_width, y + section_height), PANEL)
         draw.text((x + 20, y + 18), group.label, fill=TEXT, font=fonts["heading"])
-        line_y = y + 62
-        for item in group.rows:
-            row_box = (x + 14, line_y - 6, x + section_width - 14, line_y + 34)
-            badge = _group_advancement_badge(item)
-            if badge is not None:
-                label, color = badge
-                draw.rounded_rectangle(
-                    row_box,
-                    radius=6,
-                    fill="#232c3b",
-                    outline=color,
-                    width=1,
-                )
-                draw.rounded_rectangle(
-                    (row_box[0], row_box[1], row_box[0] + 5, row_box[3]),
-                    radius=2,
-                    fill=color,
-                )
-            draw.text((x + 20, line_y), f"{item.position}.", fill=MUTED, font=fonts["body"])
-            _draw_team(
+        first_row_y = y + 56
+        cutoff_position = _group_cutoff_position(group)
+        for row_index, item in enumerate(group.rows):
+            row_y = first_row_y + row_index * 42
+            if row_index + 1 > cutoff_position:
+                row_y += 12
+            _draw_group_row(
                 image,
                 draw,
-                x + 58,
-                line_y,
-                item.team_name,
-                item.flag_code,
-                fonts["body"],
+                item,
+                x,
+                row_y,
+                section_width,
+                fonts,
+                is_below_cutoff=row_index + 1 > cutoff_position,
             )
-            if badge is not None:
-                _pill(
-                    draw,
-                    x + section_width - 120,
-                    line_y - 3,
-                    label,
-                    color,
-                    fonts["small"],
-                    width=92,
-                )
-            elif item.status.state != "pending":
-                _pill(
-                    draw,
-                    x + section_width - 76,
-                    line_y - 3,
-                    _status_icon(item.status),
-                    _status_color(item.status),
-                    fonts["small"],
-                )
-            line_y += 42
+        _draw_group_cutoff(draw, cutoff_position, x, first_row_y, section_width)
 
     return _png_bytes(image)
 
@@ -725,6 +709,39 @@ def _match_loser(match: object) -> tuple[str, str | None]:
     return home_name, home_flag
 
 
+def _draw_group_legend(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    fonts: dict[str, ImageFont.ImageFont],
+) -> None:
+    x = width - 400
+    y = 36
+    text_y = y + 14
+    draw.text((x, text_y), "Status", fill=MUTED, font=fonts["small"], anchor="lm")
+    x += 68
+    for label, color, text in (
+        ("+3", CORRECT, "earned"),
+        ("✕", INCORRECT, "missed"),
+    ):
+        _pill(
+            draw,
+            x,
+            y,
+            label,
+            color,
+            fonts["small"],
+            width=GROUP_ICON_BADGE_WIDTH,
+        )
+        draw.text(
+            (x + GROUP_ICON_BADGE_WIDTH + 10, text_y),
+            text,
+            fill=MUTED,
+            font=fonts["small"],
+            anchor="lm",
+        )
+        x += 138
+
+
 def _draw_bracket_legend(
     draw: ImageDraw.ImageDraw,
     width: int,
@@ -812,17 +829,138 @@ def _trophy_image(*, height: int) -> Image.Image | None:
     return source.resize((width, height), Image.Resampling.LANCZOS)
 
 
-def _group_advancement_badge(row: object) -> tuple[str, str] | None:
+def _draw_group_row(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    row: object,
+    x: int,
+    y: int,
+    section_width: int,
+    fonts: dict[str, ImageFont.ImageFont],
+    *,
+    is_below_cutoff: bool,
+) -> None:
+    center_y = y + GROUP_ROW_HEIGHT // 2
+    marker = None if is_below_cutoff else _group_advancement_marker(row)
+    row_fill = MUTED
+    if marker is not None and marker[2] == "correct":
+        row_fill = TEXT
+
+    team_x = x + 58
+    full_badge_x = _group_badge_x(x, section_width, GROUP_FULL_BADGE_WIDTH)
+    draw.text(
+        (x + 20, center_y),
+        f"{row.position}.",
+        fill=MUTED,
+        font=fonts["body"],
+        anchor="lm",
+    )
+    _draw_group_team(
+        image,
+        draw,
+        team_x,
+        center_y,
+        getattr(row, "team_name"),
+        getattr(row, "flag_code"),
+        fonts["body"],
+        max_width=full_badge_x - team_x - GROUP_BADGE_GAP,
+        fill=row_fill,
+    )
+    if marker is not None:
+        label, color, state = marker
+        if state == "pending":
+            return
+        _pill(
+            draw,
+            full_badge_x,
+            center_y - 14,
+            label,
+            color,
+            fonts["small"],
+            width=GROUP_FULL_BADGE_WIDTH,
+        )
+
+
+def _draw_group_team(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    center_y: int,
+    name: str,
+    flag_code: str | None,
+    font: ImageFont.ImageFont,
+    *,
+    max_width: int,
+    fill: str,
+) -> None:
+    flag = _flag_image(flag_code, width=28, height=20)
+    text_x = x
+    if flag is not None:
+        image.paste(flag, (x, center_y - 10), flag)
+        text_x += 36
+    text = _fit_to_width(name, font, max_width - (text_x - x))
+    draw.text((text_x, center_y), text, fill=fill, font=font, anchor="lm")
+
+
+def _group_badge_x(x: int, section_width: int, badge_width: int) -> int:
+    return x + section_width - GROUP_BADGE_RIGHT_PADDING - badge_width
+
+
+def _draw_group_cutoff(
+    draw: ImageDraw.ImageDraw,
+    cutoff_position: int,
+    x: int,
+    first_row_y: int,
+    section_width: int,
+) -> None:
+    y = first_row_y + cutoff_position * 42 + 4
+    start_x = x + 22
+    end_x = x + section_width - 22
+    dash = 10
+    gap = 7
+    cursor = start_x
+    while cursor < end_x:
+        draw.line((cursor, y, min(cursor + dash, end_x), y), fill="#6f7b8b", width=1)
+        cursor += dash + gap
+
+
+def _group_cutoff_position(group: object) -> int:
+    return 3 if _group_has_advancing_third(group) else 2
+
+
+def _group_has_advancing_third(group: object) -> bool:
+    return any(
+        getattr(row, "position") == 3 and getattr(row, "third_place_status") is not None
+        for row in getattr(group, "rows")
+    )
+
+
+def _group_advancement_marker(row: object) -> tuple[str, str, str] | None:
     if row.position <= 2:
         if row.status.state == "pending":
-            return ("ADV", ACCENT)
-        return (f"ADV {_status_icon(row.status)}", _status_color(row.status))
+            return ("", ACCENT, "pending")
+        label = (
+            row.status.label
+            if row.status.state == "correct"
+            else _status_icon(row.status)
+        )
+        return (
+            label,
+            _status_color(row.status),
+            row.status.state,
+        )
     if row.position == 3 and row.third_place_status is not None:
         if row.third_place_status.state == "pending":
-            return ("3P PICK", THIRD_PLACE)
+            return ("", THIRD_PLACE, "pending")
+        label = (
+            row.third_place_status.label
+            if row.third_place_status.state == "correct"
+            else _status_icon(row.third_place_status)
+        )
         return (
-            f"3P {_status_icon(row.third_place_status)}",
+            label,
             _status_color(row.third_place_status),
+            row.third_place_status.state,
         )
     return None
 
@@ -839,7 +977,16 @@ def _group_section_width(
         ),
         default=0,
     )
-    return max(420, 58 + 36 + max_name_width + 12 + 120 + 14)
+    return max(
+        420,
+        58
+        + 36
+        + max_name_width
+        + GROUP_BADGE_GAP
+        + GROUP_FULL_BADGE_WIDTH
+        + GROUP_BADGE_RIGHT_PADDING
+        + 14,
+    )
 
 
 def _side_column_widths(
@@ -942,8 +1089,7 @@ def _draw_status_icon(
     if icon == "check":
         draw.line((x - 6, y, x - 2, y + 5, x + 7, y - 6), fill="#ffffff", width=2)
         return
-    draw.line((x - 5, y - 5, x + 5, y + 5), fill="#ffffff", width=2)
-    draw.line((x + 5, y - 5, x - 5, y + 5), fill="#ffffff", width=2)
+    _draw_x_icon(draw, x, y)
 
 
 def _draw_team(
