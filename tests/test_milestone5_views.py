@@ -22,6 +22,8 @@ from world_cup_bot.domain.predictions import (
 )
 from world_cup_bot.services.leaderboard_service import RankedScore, leaderboard_row_text
 from world_cup_bot.services.prediction_view_service import (
+    BracketRenderMatch,
+    BracketRenderModel,
     GroupRenderRow,
     GroupRenderSection,
     GroupSheetRenderModel,
@@ -179,6 +181,95 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(bracket_png.startswith(b"\x89PNG"))
         bracket_image = Image.open(BytesIO(bracket_png))
         self.assertLessEqual(bracket_image.size[0], 2054)
+
+    def test_bracket_renderer_sizes_long_names_per_column(self) -> None:
+        if not PIL_AVAILABLE:
+            self.skipTest("Pillow is not installed in this Python environment.")
+
+        from io import BytesIO
+
+        from PIL import Image
+
+        from world_cup_bot.ui.image_renderer import render_bracket_png
+
+        long_name = "Bosnia and Herzegovina"
+        matches = [
+            BracketRenderMatch(
+                round_label="Round of 32",
+                match_id=f"R32-{index}",
+                home_team_name=long_name if index == 1 else f"Team {index}A",
+                home_flag_code=None,
+                home_status=RenderStatus(label="+1", state="correct"),
+                away_team_name=f"Team {index}B",
+                away_flag_code=None,
+                away_status=RenderStatus(label="+1", state="correct"),
+                winner_team_name=long_name if index == 1 else f"Team {index}A",
+                winner_flag_code=None,
+                status=RenderStatus(label="+1", state="correct"),
+            )
+            for index in range(1, 17)
+        ]
+        render_model = BracketRenderModel(
+            title="Sample bracket",
+            subtitle="FIFA World Cup 2026",
+            meta=(),
+            matches=tuple(matches),
+        )
+
+        image = Image.open(BytesIO(render_bracket_png(render_model)))
+
+        self.assertLess(image.size[0], 2400)
+
+    def test_bracket_renderer_sizes_callout_for_third_place_name(self) -> None:
+        if not PIL_AVAILABLE:
+            self.skipTest("Pillow is not installed in this Python environment.")
+
+        from io import BytesIO
+
+        from PIL import Image
+
+        from world_cup_bot.ui.image_renderer import render_bracket_png
+
+        status = RenderStatus(label="+1", state="correct")
+        long_name = "Democratic Republic of the Congo Long Name Test"
+        matches = (
+            BracketRenderMatch(
+                round_label="Final",
+                match_id="F",
+                home_team_name="Team A",
+                home_flag_code=None,
+                home_status=status,
+                away_team_name="Team B",
+                away_flag_code=None,
+                away_status=status,
+                winner_team_name="Team A",
+                winner_flag_code=None,
+                status=status,
+            ),
+            BracketRenderMatch(
+                round_label="Third-place match",
+                match_id="TP",
+                home_team_name=long_name,
+                home_flag_code=None,
+                home_status=status,
+                away_team_name="Team C",
+                away_flag_code=None,
+                away_status=status,
+                winner_team_name=long_name,
+                winner_flag_code=None,
+                status=status,
+            ),
+        )
+        render_model = BracketRenderModel(
+            title="Sample bracket",
+            subtitle="FIFA World Cup 2026",
+            meta=(),
+            matches=matches,
+        )
+
+        image = Image.open(BytesIO(render_bracket_png(render_model)))
+
+        self.assertGreater(image.size[0], 2054)
 
     def test_group_renderer_draws_flag_asset_when_svg_renderer_is_available(self) -> None:
         if not PIL_AVAILABLE:

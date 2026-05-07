@@ -121,13 +121,32 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
     match_pitch = 80
     rounds = _rounds(model)
     fonts = _fonts()
-    column_width = _bracket_column_width(rounds, fonts)
-    left_columns, final_x, right_columns = _bracket_columns(
+    side_round_labels = ("Round of 32", "Round of 16", "Quarter-finals", "Semi-finals")
+    left_widths = _side_column_widths(rounds, fonts, side="left")
+    right_widths = _side_column_widths(rounds, fonts, side="right")
+    final_column = _BracketColumn(
+        x=0,
+        width=_bracket_column_width(
+            (
+                *rounds.get("Final", ()),
+                *rounds.get("Third-place match", ()),
+            ),
+            fonts,
+        ),
+    )
+    left_columns, final_column, right_columns = _bracket_columns(
         margin=margin,
-        column_width=column_width,
+        left_widths=left_widths,
+        final_column=final_column,
+        right_widths=right_widths,
         gap=gap,
     )
-    width = max(1900, right_columns["Round of 32"] + column_width + margin)
+    width = max(
+        1900,
+        right_columns["Round of 32"].x
+        + right_columns["Round of 32"].width
+        + margin,
+    )
     side_slots = max(1, (len(rounds.get("Round of 32", ())) + 1) // 2)
     base_height = header_height + max(8, side_slots) * match_pitch + margin
     height = base_height
@@ -144,7 +163,6 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
         divider_y=header_divider_y,
     )
     _draw_bracket_legend(draw, width, fonts)
-    side_round_labels = ("Round of 32", "Round of 16", "Quarter-finals", "Semi-finals")
 
     left = _side_bracket_layout(
         rounds=rounds,
@@ -183,11 +201,18 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
             divider_y=header_divider_y,
         )
 
-    for label, x in left_columns.items():
-        _draw_round_label(draw, x, round_label_y, column_width, label, fonts)
-    _draw_round_label(draw, final_x, round_label_y, column_width, "Final", fonts)
-    for label, x in right_columns.items():
-        _draw_round_label(draw, x, round_label_y, column_width, label, fonts)
+    for label, column in left_columns.items():
+        _draw_round_label(draw, column.x, round_label_y, column.width, label, fonts)
+    _draw_round_label(
+        draw,
+        final_column.x,
+        round_label_y,
+        final_column.width,
+        "Final",
+        fonts,
+    )
+    for label, column in right_columns.items():
+        _draw_round_label(draw, column.x, round_label_y, column.width, label, fonts)
 
     for round_index in range(len(side_round_labels) - 1):
         current_label = side_round_labels[round_index]
@@ -196,24 +221,21 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
             draw,
             left.get(current_label, ()),
             left.get(next_label, ()),
-            column_width=column_width,
             direction="right",
         )
         _draw_bracket_connectors(
             draw,
             right.get(current_label, ()),
             right.get(next_label, ()),
-            column_width=column_width,
             direction="left",
         )
     if final is not None:
-        final_box = _PlacedMatch(final, final_x, final_y)
+        final_box = _PlacedMatch(final, final_column.x, final_y, final_column.width)
         _draw_final_connectors(
             draw,
             left_semis,
             right_semis,
             final_box,
-            column_width=column_width,
         )
         _draw_champion_callout(
             image,
@@ -223,9 +245,9 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
             model.champion_status,
             model.runner_up_status,
             model.third_place_status,
-            final_x,
+            final_column.x,
             final_y - 196,
-            column_width,
+            final_column.width,
             fonts,
         )
 
@@ -238,7 +260,7 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
                     placed.match,
                     placed.x,
                     placed.y,
-                    column_width,
+                    placed.width,
                     match_height,
                     fonts,
                 )
@@ -247,9 +269,9 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
             image,
             draw,
             final,
-            final_x,
+            final_column.x,
             final_y,
-            column_width,
+            final_column.width,
             match_height,
             fonts,
         )
@@ -260,23 +282,67 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
 def _bracket_columns(
     *,
     margin: int,
-    column_width: int,
+    left_widths: dict[str, int],
+    final_column: "_BracketColumn",
+    right_widths: dict[str, int],
     gap: int,
-) -> tuple[dict[str, int], int, dict[str, int]]:
-    normal_step = column_width + gap
-    compact_step = column_width - min(BRACKET_COMPACT_OVERLAP, column_width // 5)
+) -> tuple[dict[str, "_BracketColumn"], "_BracketColumn", dict[str, "_BracketColumn"]]:
     left_columns = {
-        "Round of 32": margin,
-        "Round of 16": margin + normal_step,
+        "Round of 32": _BracketColumn(margin, left_widths["Round of 32"]),
     }
-    left_columns["Quarter-finals"] = left_columns["Round of 16"] + compact_step
-    left_columns["Semi-finals"] = left_columns["Quarter-finals"] + compact_step
-    final_x = left_columns["Semi-finals"] + normal_step
-    right_columns = {"Semi-finals": final_x + normal_step}
-    right_columns["Quarter-finals"] = right_columns["Semi-finals"] + compact_step
-    right_columns["Round of 16"] = right_columns["Quarter-finals"] + compact_step
-    right_columns["Round of 32"] = right_columns["Round of 16"] + normal_step
-    return left_columns, final_x, right_columns
+    left_columns["Round of 16"] = _next_column(
+        left_columns["Round of 32"],
+        width=left_widths["Round of 16"],
+        gap=gap,
+    )
+    left_columns["Quarter-finals"] = _next_column(
+        left_columns["Round of 16"],
+        width=left_widths["Quarter-finals"],
+        gap=-_compact_overlap(left_columns["Round of 16"].width),
+    )
+    left_columns["Semi-finals"] = _next_column(
+        left_columns["Quarter-finals"],
+        width=left_widths["Semi-finals"],
+        gap=-_compact_overlap(left_columns["Quarter-finals"].width),
+    )
+    final_column = _BracketColumn(
+        x=left_columns["Semi-finals"].x + left_columns["Semi-finals"].width + gap,
+        width=final_column.width,
+    )
+    right_columns = {
+        "Semi-finals": _next_column(
+            final_column,
+            width=right_widths["Semi-finals"],
+            gap=gap,
+        ),
+    }
+    right_columns["Quarter-finals"] = _next_column(
+        right_columns["Semi-finals"],
+        width=right_widths["Quarter-finals"],
+        gap=-_compact_overlap(right_columns["Semi-finals"].width),
+    )
+    right_columns["Round of 16"] = _next_column(
+        right_columns["Quarter-finals"],
+        width=right_widths["Round of 16"],
+        gap=-_compact_overlap(right_columns["Quarter-finals"].width),
+    )
+    right_columns["Round of 32"] = _next_column(
+        right_columns["Round of 16"],
+        width=right_widths["Round of 32"],
+        gap=gap,
+    )
+    return left_columns, final_column, right_columns
+
+
+def _next_column(previous: "_BracketColumn", *, width: int, gap: int) -> "_BracketColumn":
+    return _BracketColumn(
+        x=previous.x + previous.width + gap,
+        width=width,
+    )
+
+
+def _compact_overlap(width: int) -> int:
+    return min(BRACKET_COMPACT_OVERLAP, width // 5)
 
 
 def _draw_round_label(
@@ -297,10 +363,17 @@ def _draw_round_label(
 
 
 @dataclass(frozen=True)
+class _BracketColumn:
+    x: int
+    width: int
+
+
+@dataclass(frozen=True)
 class _PlacedMatch:
     match: object
     x: int
     y: int
+    width: int
 
 
 def _rounds(model: BracketRenderModel) -> dict[str, list[object]]:
@@ -313,7 +386,7 @@ def _rounds(model: BracketRenderModel) -> dict[str, list[object]]:
 def _side_bracket_layout(
     *,
     rounds: dict[str, list[object]],
-    columns: dict[str, int],
+    columns: dict[str, _BracketColumn],
     start_y: int,
     match_height: int,
     match_pitch: int,
@@ -334,7 +407,12 @@ def _side_bracket_layout(
             round_centers = _parent_centers(previous_centers, len(matches), match_pitch)
         centers[label] = round_centers
         layout[label] = tuple(
-            _PlacedMatch(match, columns[label], round_centers[index] - match_height // 2)
+            _PlacedMatch(
+                match,
+                columns[label].x,
+                round_centers[index] - match_height // 2,
+                columns[label].width,
+            )
             for index, match in enumerate(matches)
             if index < len(round_centers)
         )
@@ -392,7 +470,6 @@ def _draw_bracket_connectors(
     children: tuple[_PlacedMatch, ...],
     parents: tuple[_PlacedMatch, ...],
     *,
-    column_width: int,
     direction: str,
 ) -> None:
     for index, parent in enumerate(parents):
@@ -400,11 +477,11 @@ def _draw_bracket_connectors(
         if not pair:
             continue
         if direction == "right":
-            child_edge = pair[0].x + column_width
+            child_edge = pair[0].x + pair[0].width
             parent_edge = parent.x
         else:
             child_edge = pair[0].x
-            parent_edge = parent.x + column_width
+            parent_edge = parent.x + parent.width
         junction_x = (child_edge + parent_edge) // 2
         parent_y = _match_center(parent)
         child_ys = [_match_center(child) for child in pair]
@@ -424,12 +501,10 @@ def _draw_final_connectors(
     left_semis: tuple[_PlacedMatch, ...],
     right_semis: tuple[_PlacedMatch, ...],
     final: _PlacedMatch,
-    *,
-    column_width: int,
 ) -> None:
     final_y = _match_center(final)
     for placed in left_semis:
-        start_x = placed.x + column_width
+        start_x = placed.x + placed.width
         start_y = _match_center(placed)
         junction_x = (start_x + final.x) // 2
         draw.line((start_x, start_y, junction_x, start_y), fill=GRID, width=2)
@@ -438,7 +513,7 @@ def _draw_final_connectors(
     for placed in right_semis:
         start_x = placed.x
         start_y = _match_center(placed)
-        final_edge = final.x + column_width
+        final_edge = final.x + final.width
         junction_x = (start_x + final_edge) // 2
         draw.line((start_x, start_y, junction_x, start_y), fill=GRID, width=2)
         draw.line((junction_x, start_y, junction_x, final_y), fill=GRID, width=2)
@@ -767,14 +842,25 @@ def _group_section_width(
     return max(420, 58 + 36 + max_name_width + 12 + 120 + 14)
 
 
-def _bracket_column_width(
+def _side_column_widths(
     rounds: dict[str, list[object]],
+    fonts: dict[str, ImageFont.ImageFont],
+    *,
+    side: str,
+) -> dict[str, int]:
+    return {
+        label: _bracket_column_width(_side_matches(rounds.get(label, ()), side), fonts)
+        for label in ("Round of 32", "Round of 16", "Quarter-finals", "Semi-finals")
+    }
+
+
+def _bracket_column_width(
+    matches: list[object] | tuple[object, ...],
     fonts: dict[str, ImageFont.ImageFont],
 ) -> int:
     max_name_width = max(
         (
             _text_width(name, fonts["small"])
-            for matches in rounds.values()
             for match in matches
             for name in (
                 getattr(match, "home_team_name"),
