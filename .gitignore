@@ -9,3 +9,4 @@ __pycache__/
 pm2.log
 dump.pm2
 .DS_Store
+bracket-sample-*.png
