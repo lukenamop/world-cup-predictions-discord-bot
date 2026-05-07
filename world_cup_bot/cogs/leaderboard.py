@@ -223,7 +223,7 @@ def leaderboard_embed(
         color=discord.Color.gold(),
     )
     if snapshot:
-        embed.set_footer(text="Use /leaderboard to browse the full standings privately.")
+        embed.set_footer(text="Use `/leaderboard` to browse the full standings.")
     return embed
 
 

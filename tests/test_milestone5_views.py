@@ -434,7 +434,7 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Page", embed.description)
         self.assertEqual(
             embed.footer.text,
-            "Use /leaderboard to browse the full standings privately.",
+            "Use `/leaderboard` to browse the full standings.",
         )
         self.assertEqual(embed.fields, [])
         self.assertIn("<@user-25>", embed.description)
