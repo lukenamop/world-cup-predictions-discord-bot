@@ -799,7 +799,7 @@ class AdminCog(commands.Cog):
             )
             if not scores:
                 raise ValueError("No leaderboard scores are available yet.")
-            return (leaderboard_embed(scores),)
+            return (leaderboard_embed(scores, snapshot=True),)
 
         settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
         tournament = await TournamentConfigRepository(

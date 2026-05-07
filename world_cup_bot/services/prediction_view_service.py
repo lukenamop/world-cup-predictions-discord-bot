@@ -265,9 +265,43 @@ def public_prediction_lines(snapshot: PredictionSnapshot) -> tuple[str, ...]:
         f"Runner-up: {model.team(summary.runner_up_team_id).short_name}",
         f"Third place: {model.team(summary.third_place_team_id).short_name}",
     ]
-    if snapshot.score is not None:
-        lines.append(f"Points: {snapshot.score.total_points}")
     return tuple(lines)
+
+
+def full_view_summary(
+    snapshot: PredictionSnapshot,
+    *,
+    current_view: str = "summary",
+) -> str:
+    if snapshot.preferences.share_full_bracket:
+        if current_view == "bracket":
+            return (
+                "Bracket image shown here. "
+                f"Use {_groups_command_hint(snapshot)} for groups."
+            )
+        if current_view == "groups":
+            return (
+                "Group image shown here. "
+                f"Use {_bracket_command_hint(snapshot)} for the bracket."
+            )
+        return (
+            "Bracket and group images are shared. "
+            f"Use {_bracket_command_hint(snapshot)} or {_groups_command_hint(snapshot)}."
+        )
+    if snapshot.is_own_prediction:
+        return (
+            "Only you can view full bracket and group images. "
+            "Use `/preferences` to share them."
+        )
+    return "Full bracket and group images are private."
+
+
+def _bracket_command_hint(snapshot: PredictionSnapshot) -> str:
+    return "`/bracket`" if snapshot.is_own_prediction else "`/bracket user:<member>`"
+
+
+def _groups_command_hint(snapshot: PredictionSnapshot) -> str:
+    return "`/groups`" if snapshot.is_own_prediction else "`/groups user:<member>`"
 
 
 def group_sheet_render_model(

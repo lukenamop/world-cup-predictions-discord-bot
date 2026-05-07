@@ -13,6 +13,7 @@ from world_cup_bot.data.repositories import (
     StoredMatchResult,
     UserPreferences,
 )
+from world_cup_bot.cogs.leaderboard import leaderboard_embed
 from world_cup_bot.domain.predictions import (
     TournamentModel,
     empty_prediction_data,
@@ -33,7 +34,9 @@ from world_cup_bot.services.prediction_view_service import (
     PredictionViewServiceError,
     RenderStatus,
     bracket_render_model,
+    full_view_summary,
     group_sheet_render_model,
+    public_prediction_lines,
 )
 
 try:
@@ -53,6 +56,37 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(owner_snapshot.can_view_full_prediction)
         self.assertFalse(other_private.can_view_full_prediction)
         self.assertTrue(other_shared.can_view_full_prediction)
+
+    def test_prediction_summary_lines_do_not_duplicate_point_total(self) -> None:
+        snapshot = _snapshot(score=_score())
+
+        lines = public_prediction_lines(snapshot)
+
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(all(not line.startswith("Points:") for line in lines))
+
+    def test_full_view_summary_mentions_image_commands_when_shared(self) -> None:
+        own_shared = _snapshot(viewer_user_id="user-1", share_full_bracket=True)
+        other_shared = _snapshot(viewer_user_id="user-2", share_full_bracket=True)
+        other_private = _snapshot(viewer_user_id="user-2", share_full_bracket=False)
+
+        self.assertIn("`/bracket`", full_view_summary(own_shared))
+        self.assertIn("`/groups`", full_view_summary(own_shared))
+        self.assertIn("`/bracket user:<member>`", full_view_summary(other_shared))
+        self.assertIn("`/groups user:<member>`", full_view_summary(other_shared))
+        self.assertNotIn("`/bracket", full_view_summary(other_private))
+        self.assertNotIn("`/groups", full_view_summary(other_private))
+
+    def test_full_view_summary_omits_current_image_command(self) -> None:
+        own_shared = _snapshot(viewer_user_id="user-1", share_full_bracket=True)
+
+        bracket_summary = full_view_summary(own_shared, current_view="bracket")
+        groups_summary = full_view_summary(own_shared, current_view="groups")
+
+        self.assertNotIn("`/bracket", bracket_summary)
+        self.assertIn("`/groups`", bracket_summary)
+        self.assertIn("`/bracket`", groups_summary)
+        self.assertNotIn("`/groups", groups_summary)
 
     def test_group_render_model_marks_known_results_without_image_logic(self) -> None:
         snapshot = _snapshot()
@@ -378,7 +412,33 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         row = leaderboard_row_text(ranked)
 
-        self.assertIn("Champion: Team A1", row)
+        self.assertEqual(row, "1. <@user-1> `⭐ 10` - `🏆 Team A1`")
+
+    def test_leaderboard_snapshot_uses_footer_instead_of_pagination(self) -> None:
+        ranked_scores = [
+            RankedScore(
+                rank=index,
+                score=replace(
+                    _score(),
+                    user_id=f"user-{index}",
+                    total_points=100 - index,
+                ),
+                champion_team_name=f"Team {index}",
+            )
+            for index in range(1, 28)
+        ]
+
+        embed = leaderboard_embed(ranked_scores, snapshot=True)
+
+        self.assertTrue(embed.description.startswith("Top 25"))
+        self.assertNotIn("Page", embed.description)
+        self.assertEqual(
+            embed.footer.text,
+            "Use /leaderboard to browse the full standings privately.",
+        )
+        self.assertEqual(embed.fields, [])
+        self.assertIn("<@user-25>", embed.description)
+        self.assertNotIn("<@user-26>", embed.description)
 
     async def test_snapshot_uses_guild_privacy_default_for_missing_preference(self) -> None:
         service = _view_service_with_privacy_default(
@@ -444,6 +504,7 @@ def _snapshot(
     *,
     viewer_user_id: str = "user-1",
     share_full_bracket: bool = False,
+    score: PredictionScore | None = None,
 ) -> PredictionSnapshot:
     model = TournamentModel.from_config(_prediction_config())
     data = _complete_home_winner_prediction(model)
@@ -476,7 +537,7 @@ def _snapshot(
         ),
         entry=entry,
         data=data,
-        score=None,
+        score=score,
         latest_sync_run=None,
         lock_deadline_utc=None,
         is_locked=False,

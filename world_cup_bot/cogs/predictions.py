@@ -36,6 +36,7 @@ from world_cup_bot.services.prediction_view_service import (
     PredictionViewService,
     PredictionViewServiceError,
     bracket_render_model,
+    full_view_summary,
     group_sheet_render_model,
     public_prediction_lines,
 )
@@ -105,7 +106,7 @@ class PredictionsCog(commands.Cog):
             return
         png = render_groups_png(group_sheet_render_model(snapshot, actual_data))
         await ctx.respond(
-            embed=_prediction_summary_embed(snapshot),
+            embed=_prediction_summary_embed(snapshot, current_view="groups"),
             file=_discord_file(png, f"groups-{snapshot.target_user_id}.png"),
             ephemeral=True,
         )
@@ -139,7 +140,7 @@ class PredictionsCog(commands.Cog):
             return
         png = render_bracket_png(bracket_render_model(snapshot, actual_data))
         await ctx.respond(
-            embed=_prediction_summary_embed(snapshot),
+            embed=_prediction_summary_embed(snapshot, current_view="bracket"),
             file=_discord_file(png, f"bracket-{snapshot.target_user_id}.png"),
             ephemeral=True,
         )
@@ -1039,29 +1040,20 @@ def _display_name(author: object) -> str:
     return str(getattr(author, "display_name", None) or getattr(author, "name", author))
 
 
-def _prediction_summary_embed(snapshot: PredictionSnapshot) -> discord.Embed:
+def _prediction_summary_embed(
+    snapshot: PredictionSnapshot,
+    *,
+    current_view: str = "summary",
+) -> discord.Embed:
     embed = discord.Embed(
         title=f"{snapshot.display_name}'s Prediction",
         description="\n".join(public_prediction_lines(snapshot)),
         color=discord.Color.blurple(),
     )
     embed.add_field(
-        name="Privacy",
-        value=(
-            "Full bracket shared"
-            if snapshot.preferences.share_full_bracket
-            else "Full bracket private"
-        ),
-        inline=True,
-    )
-    embed.add_field(
-        name="Lock",
-        value=(
-            discord_datetime(snapshot.lock_deadline_utc)
-            if snapshot.lock_deadline_utc
-            else "Not configured"
-        ),
-        inline=True,
+        name="Full predictions",
+        value=full_view_summary(snapshot, current_view=current_view),
+        inline=False,
     )
     if snapshot.score is not None:
         embed.add_field(

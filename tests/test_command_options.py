@@ -87,6 +87,44 @@ class CommandOptionMetadataTests(unittest.TestCase):
         self.assertIn("post_leaderboard_command", command_names)
         self.assertNotIn("post_command", command_names)
 
+    def test_leaderboard_command_responses_are_ephemeral(self) -> None:
+        tree = ast.parse(
+            (PROJECT_ROOT / "world_cup_bot" / "cogs" / "leaderboard.py").read_text()
+        )
+        leaderboard_command = _function_by_name(tree, "leaderboard_command")
+        responses = [
+            node
+            for node in ast.walk(leaderboard_command)
+            if isinstance(node, ast.Call) and _is_ctx_respond(node.func)
+        ]
+
+        self.assertGreater(len(responses), 0)
+        for response in responses:
+            self.assertTrue(
+                _has_true_keyword(response, "ephemeral"),
+                "leaderboard_command ctx.respond calls should be ephemeral.",
+            )
+
+    def test_admin_post_leaderboard_uses_snapshot_embed(self) -> None:
+        tree = ast.parse(
+            (PROJECT_ROOT / "world_cup_bot" / "cogs" / "admin.py").read_text()
+        )
+        announcement_embeds = _async_function_by_name(tree, "_announcement_embeds")
+        leaderboard_embed_calls = [
+            node
+            for node in ast.walk(announcement_embeds)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "leaderboard_embed"
+        ]
+
+        self.assertGreater(len(leaderboard_embed_calls), 0)
+        for call in leaderboard_embed_calls:
+            self.assertTrue(
+                _has_true_keyword(call, "snapshot"),
+                "admin leaderboard posts should use non-paginated snapshot embeds.",
+            )
+
 
 def _command_functions(tree: ast.AST) -> list[ast.AsyncFunctionDef]:
     functions: list[ast.AsyncFunctionDef] = []
@@ -105,10 +143,32 @@ def _function_by_name(tree: ast.AST, name: str) -> ast.AsyncFunctionDef:
     raise AssertionError(f"Missing command function: {name}")
 
 
+def _async_function_by_name(tree: ast.AST, name: str) -> ast.AsyncFunctionDef:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"Missing async function: {name}")
+
+
 def _is_command_decorator(decorator: ast.expr) -> bool:
     target = decorator.func if isinstance(decorator, ast.Call) else decorator
     if isinstance(target, ast.Attribute):
         return target.attr in {"slash_command", "command"}
+    return False
+
+
+def _is_ctx_respond(node: ast.expr) -> bool:
+    if not isinstance(node, ast.Attribute) or node.attr != "respond":
+        return False
+    value = node.value
+    return isinstance(value, ast.Name) and value.id == "ctx"
+
+
+def _has_true_keyword(call: ast.Call, keyword_name: str) -> bool:
+    for keyword in call.keywords:
+        if keyword.arg != keyword_name:
+            continue
+        return isinstance(keyword.value, ast.Constant) and keyword.value.value is True
     return False
 
 

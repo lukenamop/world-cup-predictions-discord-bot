@@ -12,7 +12,8 @@ from world_cup_bot.services.leaderboard_service import (
 )
 from world_cup_bot.ui.discord_formatting import discord_datetime, discord_timestamp
 
-PAGE_SIZE = 10
+PAGE_SIZE = 25
+EMBED_DESCRIPTION_LIMIT = 4096
 
 
 class LeaderboardCog(commands.Cog):
@@ -60,7 +61,7 @@ class LeaderboardCog(commands.Cog):
             page=max(1, page),
             requester_user_id=str(ctx.author.id),
         )
-        await ctx.respond(embed=view.embed(), view=view)
+        await ctx.respond(embed=view.embed(), view=view, ephemeral=True)
 
     @discord.slash_command(name="rank", description="Show a user's current rank.")
     @discord.option(
@@ -204,32 +205,40 @@ def leaderboard_embed(
     ranked_scores: list[RankedScore],
     *,
     page: int = 1,
+    snapshot: bool = False,
 ) -> discord.Embed:
     page_count = max(1, (len(ranked_scores) + PAGE_SIZE - 1) // PAGE_SIZE)
-    safe_page = min(max(1, page), page_count)
+    safe_page = 1 if snapshot else min(max(1, page), page_count)
     start = (safe_page - 1) * PAGE_SIZE
     rows = ranked_scores[start : start + PAGE_SIZE]
     latest = max((ranked.score.recalculated_at for ranked in ranked_scores), default=None)
-    description = f"Page {safe_page}/{page_count}"
+    meta = f"Top {len(rows)}" if snapshot else f"Page {safe_page}/{page_count}"
     if latest is not None:
-        description = f"{description}\nLast updated {discord_timestamp(latest, 'R')}"
+        meta = f"{meta}\nLast updated {discord_timestamp(latest, 'R')}"
+    lines = [leaderboard_row_text(ranked) for ranked in rows]
+    description = _leaderboard_description(meta, lines)
     embed = discord.Embed(
         title="Leaderboard",
         description=description,
         color=discord.Color.gold(),
     )
-    lines = []
-    for ranked in rows:
-        lines.append(leaderboard_row_text(ranked))
-    embed.add_field(name="Rankings", value="\n".join(lines)[:1024], inline=False)
+    if snapshot:
+        embed.set_footer(text="Use /leaderboard to browse the full standings privately.")
     return embed
+
+
+def _leaderboard_description(meta: str, lines: list[str]) -> str:
+    rankings = "\n".join(lines)
+    description = f"{meta}\n\n{rankings}" if rankings else meta
+    if len(description) <= EMBED_DESCRIPTION_LIMIT:
+        return description
+    return description[: EMBED_DESCRIPTION_LIMIT - 3].rstrip() + "..."
 
 
 def _rank_embed(ranked: RankedScore) -> discord.Embed:
     score = ranked.score
     embed = discord.Embed(
-        title=f"Rank #{ranked.rank}",
-        description=score.display_name,
+        title=f"Rank #{ranked.rank}: {score.display_name}",
         color=discord.Color.blurple(),
     )
     embed.add_field(name="Total", value=str(score.total_points), inline=True)
@@ -250,6 +259,7 @@ def _points_embed(ranked: RankedScore) -> discord.Embed:
     placements = knockout.get("placements", {}) if isinstance(knockout, dict) else {}
     embed = _rank_embed(ranked)
     embed.title = f"Point Breakdown: {score.display_name}"
+    embed.description = None
     embed.add_field(
         name="Third-place hits",
         value=", ".join(groups.get("third_place_qualifier_hits", [])) or "None yet",
@@ -265,16 +275,6 @@ def _points_embed(ranked: RankedScore) -> discord.Embed:
         value=_placement_summary(placements),
         inline=False,
     )
-    embed.add_field(
-        name="Scoring version",
-        value=str(score.breakdown.get("version") or score.scoring_version),
-        inline=True,
-    )
-    embed.add_field(
-        name="Knockout points",
-        value=str(knockout.get("points", score.knockout_points)),
-        inline=True,
-    )
     return embed
 
 
@@ -289,7 +289,8 @@ def _advancement_summary(rows: object) -> str:
         label = ROUND_LABELS.get(round_name, round_name.replace("_", " ").title())
         hits = row.get("hits")
         hit_count = len(hits) if isinstance(hits, list) else 0
-        lines.append(f"{label}: {row.get('points', 0)} ({hit_count})")
+        team_label = "team" if hit_count == 1 else "teams"
+        lines.append(f"{label}: {row.get('points', 0)} pts from {hit_count} {team_label}")
     return "\n".join(lines) or "None yet"
 
 
@@ -297,9 +298,9 @@ def _placement_summary(placements: object) -> str:
     if not isinstance(placements, dict):
         return "None yet"
     return (
-        f"Third place: {placements.get('third_place_points', 0)}\n"
-        f"Champion: {placements.get('champion_points', 0)}\n"
-        f"Runner-up: {placements.get('runner_up_points', 0)}"
+        f"Third place: {placements.get('third_place_points', 0)} pts\n"
+        f"Champion: {placements.get('champion_points', 0)} pts\n"
+        f"Runner-up: {placements.get('runner_up_points', 0)} pts"
     )
 
 
