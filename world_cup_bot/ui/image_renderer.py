@@ -33,6 +33,9 @@ FONT_PATH = (
     / "AtkinsonHyperlegible-Regular.ttf"
 )
 BRACKET_COMPACT_OVERLAP = 46
+BRACKET_BADGE_WIDTH = 34
+BRACKET_STATUS_RAIL_WIDTH = 52
+BRACKET_BADGE_GAP = 10
 
 
 def render_groups_png(model: GroupSheetRenderModel) -> bytes:
@@ -111,9 +114,9 @@ def render_groups_png(model: GroupSheetRenderModel) -> bytes:
 
 def render_bracket_png(model: BracketRenderModel) -> bytes:
     margin = 48
-    header_height = 150
-    header_divider_y = 140
-    round_label_y = 106
+    header_height = 176
+    header_divider_y = 158
+    round_label_y = 126
     gap = 18
     match_height = 60
     match_pitch = 80
@@ -464,6 +467,8 @@ def _draw_bracket_match(
         outline=GRID,
         width=1,
     )
+    rail_x = x + width - BRACKET_STATUS_RAIL_WIDTH
+    draw.line((rail_x, y + 6, rail_x, y + height - 6), fill=GRID, width=1)
     _draw_bracket_team_row(
         image,
         draw,
@@ -499,19 +504,22 @@ def _draw_bracket_team_row(
     status: RenderStatus,
     fonts: dict[str, ImageFont.ImageFont],
 ) -> None:
+    team_x = x + 13
+    badge_x = _bracket_badge_x(x, width)
     _draw_team(
         image,
         draw,
-        x + 13,
+        team_x,
         y + 2,
         name,
         flag_code,
         fonts["small"],
         fill=TEXT if status.state == "correct" else MUTED,
+        max_width=badge_x - team_x - BRACKET_BADGE_GAP,
     )
     _bracket_status_badge(
         draw,
-        x + width - 43,
+        badge_x,
         y + 1,
         status,
         fonts["tiny"],
@@ -531,7 +539,7 @@ def _draw_champion_callout(
     width: int,
     fonts: dict[str, ImageFont.ImageFont],
 ) -> None:
-    callout_width = max(width + 76, 326)
+    callout_width = max(width + 116, 384)
     x -= (callout_width - width) // 2
     height = 154 if third_place is not None else 124
     box = (x, y, x + callout_width, y + height)
@@ -542,18 +550,22 @@ def _draw_champion_callout(
         outline=THIRD_PLACE,
         width=1,
     )
+    rail_x = x + callout_width - BRACKET_STATUS_RAIL_WIDTH
+    draw.line((rail_x, y + 12, rail_x, y + height - 12), fill=GRID, width=1)
     _draw_trophy_image(image, x + 18, y + 12, height=78)
-    draw.text((x + 70, y + 16), "Champion", fill=THIRD_PLACE, font=fonts["small"])
-    champion_badge_x = x + callout_width - 54
+    label_x = x + 80
+    team_x = x + 152
+    champion_badge_x = _bracket_badge_x(x, callout_width)
+    draw.text((label_x, y + 16), "Champion", fill=THIRD_PLACE, font=fonts["small"])
     _draw_team(
         image,
         draw,
-        x + 70,
+        label_x,
         y + 44,
         getattr(final, "winner_team_name"),
         getattr(final, "winner_flag_code"),
         fonts["body"],
-        max_width=champion_badge_x - (x + 70) - 8,
+        max_width=champion_badge_x - label_x - BRACKET_BADGE_GAP,
     )
     _bracket_status_badge(
         draw,
@@ -575,7 +587,8 @@ def _draw_champion_callout(
         runner_up_flag,
         runner_up_status,
         callout_width,
-        fonts,
+        team_x=team_x,
+        fonts=fonts,
     )
     if third_place is not None:
         _draw_placement_row(
@@ -589,7 +602,8 @@ def _draw_champion_callout(
             getattr(third_place, "winner_flag_code"),
             third_place_status or RenderStatus(label="...", state="pending"),
             callout_width,
-            fonts,
+            team_x=team_x,
+            fonts=fonts,
         )
 
 
@@ -604,13 +618,14 @@ def _draw_placement_row(
     flag_code: str | None,
     status: RenderStatus,
     width: int,
+    team_x: int,
     fonts: dict[str, ImageFont.ImageFont],
 ) -> None:
     draw.ellipse((x, y + 1, x + 20, y + 21), fill=GRID)
     draw.text((x + 10, y + 11), rank, fill=TEXT, font=fonts["tiny"], anchor="mm")
     draw.text((x + 30, y + 2), label, fill=MUTED, font=fonts["small"])
-    team_x = x + 128
-    badge_x = x + width - 72
+    card_x = x - 18
+    badge_x = _bracket_badge_x(card_x, width)
     _draw_team(
         image,
         draw,
@@ -619,9 +634,13 @@ def _draw_placement_row(
         team_name,
         flag_code,
         fonts["small"],
-        max_width=badge_x - team_x - 8,
+        max_width=badge_x - team_x - BRACKET_BADGE_GAP,
     )
     _bracket_status_badge(draw, badge_x, y + 1, status, fonts["tiny"])
+
+
+def _bracket_badge_x(x: int, width: int) -> int:
+    return x + width - 13 - BRACKET_BADGE_WIDTH
 
 
 def _match_loser(match: object) -> tuple[str, str | None]:
@@ -644,14 +663,15 @@ def _draw_bracket_legend(
     x = width - 430
     y = 36
     items = (
-        (RenderStatus(label="+5", state="correct"), "points"),
+        (RenderStatus(label="+5", state="correct"), "earned"),
         (RenderStatus(label="X", state="incorrect"), "missed"),
     )
-    draw.text((x, y + 3), "Icons", fill=MUTED, font=fonts["small"])
-    x += 58
+    text_y = y + 11
+    draw.text((x, text_y), "Scoring", fill=MUTED, font=fonts["small"], anchor="lm")
+    x += 76
     for status, label in items:
         _bracket_status_badge(draw, x, y, status, fonts["tiny"])
-        draw.text((x + 42, y + 3), label, fill=MUTED, font=fonts["small"])
+        draw.text((x + 42, text_y), label, fill=MUTED, font=fonts["small"], anchor="lm")
         x += 132
 
 
