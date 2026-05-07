@@ -106,6 +106,8 @@ def render_groups_png(model: GroupSheetRenderModel) -> bytes:
 def render_bracket_png(model: BracketRenderModel) -> bytes:
     margin = 48
     header_height = 150
+    header_divider_y = 140
+    round_label_y = 106
     gap = 18
     match_height = 60
     match_pitch = 80
@@ -124,7 +126,15 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
     image = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(image)
 
-    _draw_header(draw, model.title, model.subtitle, model.meta, width, fonts)
+    _draw_header(
+        draw,
+        model.title,
+        model.subtitle,
+        model.meta,
+        width,
+        fonts,
+        divider_y=header_divider_y,
+    )
     _draw_bracket_legend(draw, width, fonts)
     side_round_labels = ("Round of 32", "Round of 16", "Quarter-finals", "Semi-finals")
 
@@ -155,13 +165,21 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
         height = needed_height
         image = Image.new("RGB", (width, height), BACKGROUND)
         draw = ImageDraw.Draw(image)
-        _draw_header(draw, model.title, model.subtitle, model.meta, width, fonts)
+        _draw_header(
+            draw,
+            model.title,
+            model.subtitle,
+            model.meta,
+            width,
+            fonts,
+            divider_y=header_divider_y,
+        )
 
     for label, x in left_columns.items():
-        draw.text((x, header_height - 40), label, fill=ACCENT, font=fonts["small_heading"])
-    draw.text((final_x, header_height - 40), "Final", fill=ACCENT, font=fonts["small_heading"])
+        _draw_round_label(draw, x, round_label_y, column_width, label, fonts)
+    _draw_round_label(draw, final_x, round_label_y, column_width, "Final", fonts)
     for label, x in right_columns.items():
-        draw.text((x, header_height - 40), label, fill=ACCENT, font=fonts["small_heading"])
+        _draw_round_label(draw, x, round_label_y, column_width, label, fonts)
 
     for round_index in range(len(side_round_labels) - 1):
         current_label = side_round_labels[round_index]
@@ -251,6 +269,23 @@ def _bracket_columns(
     right_columns["Round of 16"] = right_columns["Quarter-finals"] + compact_step
     right_columns["Round of 32"] = right_columns["Round of 16"] + normal_step
     return left_columns, final_x, right_columns
+
+
+def _draw_round_label(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    column_width: int,
+    label: str,
+    fonts: dict[str, ImageFont.ImageFont],
+) -> None:
+    draw.text(
+        (x + column_width // 2, y),
+        label,
+        fill=ACCENT,
+        font=fonts["small_heading"],
+        anchor="ma",
+    )
 
 
 @dataclass(frozen=True)
@@ -742,12 +777,14 @@ def _draw_header(
     meta: tuple[str, ...],
     width: int,
     fonts: dict[str, ImageFont.ImageFont],
+    *,
+    divider_y: int = 132,
 ) -> None:
     draw.text((48, 34), title, fill=TEXT, font=fonts["title"])
     draw.text((48, 88), subtitle, fill=MUTED, font=fonts["body"])
     meta_text = "  |  ".join(meta)
     draw.text((width - 48, 92), meta_text, fill=MUTED, font=fonts["small"], anchor="ra")
-    draw.line((48, 132, width - 48, 132), fill=GRID, width=2)
+    draw.line((48, divider_y, width - 48, divider_y), fill=GRID, width=2)
 
 
 def _pill(
@@ -925,13 +962,15 @@ def _fonts() -> dict[str, ImageFont.ImageFont]:
 
 
 def _font(size: int) -> ImageFont.ImageFont:
-    for path in (
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/Supplemental/Helvetica.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    for path, index in (
+        ("/System/Library/Fonts/Avenir Next.ttc", 5),
+        ("/System/Library/Fonts/Avenir.ttc", 0),
+        ("/System/Library/Fonts/Supplemental/Arial.ttf", 0),
+        ("/System/Library/Fonts/Supplemental/Helvetica.ttf", 0),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 0),
     ):
         try:
-            return ImageFont.truetype(path, size=size)
+            return ImageFont.truetype(path, size=size, index=index)
         except OSError:
             continue
     return ImageFont.load_default()

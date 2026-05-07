@@ -135,8 +135,16 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
             for match in render_model.matches
             if match.round_label == "Round of 32" and match.match_id == "R32-1"
         )
+        semi_final_match = next(
+            match
+            for match in render_model.matches
+            if match.round_label == "Semi-finals"
+            and match.home_team_name == "Team A1"
+        )
         self.assertEqual(opening_match.home_status.state, "incorrect")
         self.assertEqual(opening_match.status.state, "incorrect")
+        self.assertEqual(semi_final_match.home_status.state, "incorrect")
+        self.assertEqual(render_model.champion_status.state, "incorrect")
 
     def test_bracket_render_model_marks_placement_bonus_statuses(self) -> None:
         snapshot = _snapshot()

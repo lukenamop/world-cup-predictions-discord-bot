@@ -547,6 +547,8 @@ def _team_cannot_reach_round(
 ) -> bool:
     if round_name == "round_of_32":
         return False
+    if _team_missed_round_of_32(model, actual_data, team_id):
+        return True
     eliminated_in = _elimination_round(model, actual_data, team_id)
     if round_name == "third_place":
         if _team_won_round(model, actual_data, team_id, "semi_finals"):
@@ -563,6 +565,20 @@ def _team_cannot_reach_round(
         return False
     return _MAIN_BRACKET_ROUNDS.index(eliminated_in) < _MAIN_BRACKET_ROUNDS.index(
         round_name
+    )
+
+
+def _team_missed_round_of_32(
+    model: TournamentModel,
+    actual_data: Mapping[str, Any],
+    team_id: str,
+) -> bool:
+    round_of_32 = _actual_matches(model, actual_data, "round_of_32")
+    if not round_of_32:
+        return False
+    return all(
+        team_id not in {match.home_team_id, match.away_team_id}
+        for match in round_of_32
     )
 
 
