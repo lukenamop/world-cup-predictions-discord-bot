@@ -26,6 +26,12 @@ ACCENT = "#5b8def"
 THIRD_PLACE = "#d5a640"
 FLAG_DIR = Path(__file__).resolve().parents[2] / "assets" / "flags"
 TROPHY_PATH = Path(__file__).resolve().parents[2] / "assets" / "trophy" / "world-cup-trophy.png"
+FONT_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "assets"
+    / "fonts"
+    / "AtkinsonHyperlegible-Regular.ttf"
+)
 BRACKET_COMPACT_OVERLAP = 46
 
 
@@ -963,8 +969,8 @@ def _fonts() -> dict[str, ImageFont.ImageFont]:
 
 def _font(size: int) -> ImageFont.ImageFont:
     for path, index in (
+        (FONT_PATH, 0),
         ("/System/Library/Fonts/Avenir Next.ttc", 5),
-        ("/System/Library/Fonts/Avenir.ttc", 0),
         ("/System/Library/Fonts/Supplemental/Arial.ttf", 0),
         ("/System/Library/Fonts/Supplemental/Helvetica.ttf", 0),
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 0),
