@@ -36,8 +36,7 @@ BRACKET_COMPACT_OVERLAP = 46
 BRACKET_BADGE_WIDTH = 34
 BRACKET_BADGE_GAP = 10
 GROUP_ROW_HEIGHT = 40
-GROUP_FULL_BADGE_WIDTH = 92
-GROUP_ICON_BADGE_WIDTH = 48
+GROUP_BADGE_WIDTH = BRACKET_BADGE_WIDTH
 GROUP_BADGE_RIGHT_PADDING = 28
 GROUP_BADGE_GAP = 14
 
@@ -714,32 +713,34 @@ def _draw_group_legend(
     width: int,
     fonts: dict[str, ImageFont.ImageFont],
 ) -> None:
+    _draw_scoring_legend(draw, width, fonts, earned_label="+3")
+
+
+def _draw_scoring_legend(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    fonts: dict[str, ImageFont.ImageFont],
+    *,
+    earned_label: str,
+) -> None:
     x = width - 400
     y = 36
-    text_y = y + 14
-    draw.text((x, text_y), "Status", fill=MUTED, font=fonts["small"], anchor="lm")
-    x += 68
-    for label, color, text in (
-        ("+3", CORRECT, "earned"),
-        ("✕", INCORRECT, "missed"),
+    text_y = y + 11
+    draw.text((x, text_y), "Scoring", fill=MUTED, font=fonts["small"], anchor="lm")
+    x += 76
+    for status, text in (
+        (RenderStatus(label=earned_label, state="correct"), "earned"),
+        (RenderStatus(label="X", state="incorrect"), "missed"),
     ):
-        _pill(
-            draw,
-            x,
-            y,
-            label,
-            color,
-            fonts["small"],
-            width=GROUP_ICON_BADGE_WIDTH,
-        )
+        _bracket_status_badge(draw, x, y, status, fonts["tiny"])
         draw.text(
-            (x + GROUP_ICON_BADGE_WIDTH + 10, text_y),
+            (x + 42, text_y),
             text,
             fill=MUTED,
             font=fonts["small"],
             anchor="lm",
         )
-        x += 138
+        x += 132
 
 
 def _draw_bracket_legend(
@@ -747,19 +748,7 @@ def _draw_bracket_legend(
     width: int,
     fonts: dict[str, ImageFont.ImageFont],
 ) -> None:
-    x = width - 430
-    y = 36
-    items = (
-        (RenderStatus(label="+5", state="correct"), "earned"),
-        (RenderStatus(label="X", state="incorrect"), "missed"),
-    )
-    text_y = y + 11
-    draw.text((x, text_y), "Scoring", fill=MUTED, font=fonts["small"], anchor="lm")
-    x += 76
-    for status, label in items:
-        _bracket_status_badge(draw, x, y, status, fonts["tiny"])
-        draw.text((x + 42, text_y), label, fill=MUTED, font=fonts["small"], anchor="lm")
-        x += 132
+    _draw_scoring_legend(draw, width, fonts, earned_label="+5")
 
 
 def _bracket_status_badge(
@@ -847,7 +836,7 @@ def _draw_group_row(
         row_fill = TEXT
 
     team_x = x + 58
-    full_badge_x = _group_badge_x(x, section_width, GROUP_FULL_BADGE_WIDTH)
+    full_badge_x = _group_badge_x(x, section_width, GROUP_BADGE_WIDTH)
     draw.text(
         (x + 20, center_y),
         f"{row.position}.",
@@ -870,14 +859,12 @@ def _draw_group_row(
         label, color, state = marker
         if state == "pending":
             return
-        _pill(
+        _bracket_status_badge(
             draw,
             full_badge_x,
-            center_y - 14,
-            label,
-            color,
-            fonts["small"],
-            width=GROUP_FULL_BADGE_WIDTH,
+            center_y - 11,
+            RenderStatus(label=label, state=state),
+            fonts["tiny"],
         )
 
 
@@ -983,7 +970,7 @@ def _group_section_width(
         + 36
         + max_name_width
         + GROUP_BADGE_GAP
-        + GROUP_FULL_BADGE_WIDTH
+        + GROUP_BADGE_WIDTH
         + GROUP_BADGE_RIGHT_PADDING
         + 14,
     )
