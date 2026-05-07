@@ -26,6 +26,7 @@ ACCENT = "#5b8def"
 THIRD_PLACE = "#d5a640"
 FLAG_DIR = Path(__file__).resolve().parents[2] / "assets" / "flags"
 TROPHY_PATH = Path(__file__).resolve().parents[2] / "assets" / "trophy" / "world-cup-trophy.png"
+BRACKET_COMPACT_OVERLAP = 46
 
 
 def render_groups_png(model: GroupSheetRenderModel) -> bytes:
@@ -111,7 +112,12 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
     rounds = _rounds(model)
     fonts = _fonts()
     column_width = _bracket_column_width(rounds, fonts)
-    width = max(1900, margin * 2 + 9 * column_width + 8 * gap)
+    left_columns, final_x, right_columns = _bracket_columns(
+        margin=margin,
+        column_width=column_width,
+        gap=gap,
+    )
+    width = max(1900, right_columns["Round of 32"] + column_width + margin)
     side_slots = max(1, (len(rounds.get("Round of 32", ())) + 1) // 2)
     base_height = header_height + max(8, side_slots) * match_pitch + margin
     height = base_height
@@ -120,19 +126,6 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
 
     _draw_header(draw, model.title, model.subtitle, model.meta, width, fonts)
     _draw_bracket_legend(draw, width, fonts)
-    left_columns = {
-        "Round of 32": margin,
-        "Round of 16": margin + (column_width + gap),
-        "Quarter-finals": margin + 2 * (column_width + gap),
-        "Semi-finals": margin + 3 * (column_width + gap),
-    }
-    final_x = margin + 4 * (column_width + gap)
-    right_columns = {
-        "Semi-finals": margin + 5 * (column_width + gap),
-        "Quarter-finals": margin + 6 * (column_width + gap),
-        "Round of 16": margin + 7 * (column_width + gap),
-        "Round of 32": margin + 8 * (column_width + gap),
-    }
     side_round_labels = ("Round of 32", "Round of 16", "Quarter-finals", "Semi-finals")
 
     left = _side_bracket_layout(
@@ -157,12 +150,7 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
     left_semis = left.get("Semi-finals", ())
     right_semis = right.get("Semi-finals", ())
     final_y = _center_stage_y(left_semis, right_semis, header_height, match_height)
-    third_y = final_y + 94
-    needed_height = (
-        third_y + match_height + margin
-        if third_place
-        else final_y + match_height + margin
-    )
+    needed_height = final_y + match_height + margin
     if needed_height > height:
         height = needed_height
         image = Image.new("RGB", (width, height), BACKGROUND)
@@ -214,21 +202,6 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
             column_width,
             fonts,
         )
-    if third_place is not None:
-        third_box = _PlacedMatch(third_place, final_x, third_y)
-        _draw_third_place_connector(
-            draw,
-            left_semis,
-            right_semis,
-            third_box,
-            column_width=column_width,
-        )
-        draw.text(
-            (final_x, third_y - 28),
-            "Third-place match",
-            fill=ACCENT,
-            font=fonts["small_heading"],
-        )
 
     for placements in (left, right):
         for placed_matches in placements.values():
@@ -254,19 +227,30 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
             match_height,
             fonts,
         )
-    if third_place is not None:
-        _draw_bracket_match(
-            image,
-            draw,
-            third_place,
-            final_x,
-            third_y,
-            column_width,
-            match_height,
-            fonts,
-        )
 
     return _png_bytes(image)
+
+
+def _bracket_columns(
+    *,
+    margin: int,
+    column_width: int,
+    gap: int,
+) -> tuple[dict[str, int], int, dict[str, int]]:
+    normal_step = column_width + gap
+    compact_step = column_width - min(BRACKET_COMPACT_OVERLAP, column_width // 5)
+    left_columns = {
+        "Round of 32": margin,
+        "Round of 16": margin + normal_step,
+    }
+    left_columns["Quarter-finals"] = left_columns["Round of 16"] + compact_step
+    left_columns["Semi-finals"] = left_columns["Quarter-finals"] + compact_step
+    final_x = left_columns["Semi-finals"] + normal_step
+    right_columns = {"Semi-finals": final_x + normal_step}
+    right_columns["Quarter-finals"] = right_columns["Semi-finals"] + compact_step
+    right_columns["Round of 16"] = right_columns["Quarter-finals"] + compact_step
+    right_columns["Round of 32"] = right_columns["Round of 16"] + normal_step
+    return left_columns, final_x, right_columns
 
 
 @dataclass(frozen=True)
@@ -416,21 +400,6 @@ def _draw_final_connectors(
         draw.line((start_x, start_y, junction_x, start_y), fill=GRID, width=2)
         draw.line((junction_x, start_y, junction_x, final_y), fill=GRID, width=2)
         draw.line((junction_x, final_y, final_edge, final_y), fill=GRID, width=2)
-
-
-def _draw_third_place_connector(
-    draw: ImageDraw.ImageDraw,
-    left_semis: tuple[_PlacedMatch, ...],
-    right_semis: tuple[_PlacedMatch, ...],
-    third_place: _PlacedMatch,
-    *,
-    column_width: int,
-) -> None:
-    if not left_semis and not right_semis:
-        return
-    center_x = third_place.x + column_width // 2
-    top_y = max(_match_center(third_place) - 34, 0)
-    draw.line((center_x, top_y, center_x, _match_center(third_place)), fill=GRID, width=2)
 
 
 def _match_center(placed: _PlacedMatch) -> int:
@@ -673,8 +642,9 @@ def _bracket_status_badge(
 
 
 def _draw_x_icon(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
-    draw.line((x - 5, y - 5, x + 5, y + 5), fill="#ffffff", width=2)
-    draw.line((x + 5, y - 5, x - 5, y + 5), fill="#ffffff", width=2)
+    size = 6
+    draw.line((x - size, y - size, x + size, y + size), fill="#ffffff", width=3)
+    draw.line((x + size, y - size, x - size, y + size), fill="#ffffff", width=3)
 
 
 def _draw_trophy_image(image: Image.Image, x: int, y: int, *, height: int) -> None:

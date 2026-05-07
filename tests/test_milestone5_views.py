@@ -108,6 +108,36 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(later_match.home_status.label, "+1")
         self.assertEqual(later_match.away_status.state, "correct")
 
+    def test_bracket_render_model_marks_future_rows_after_early_elimination(self) -> None:
+        snapshot = _snapshot()
+        actual_data = _actual_data_with_round_of_32_elimination(snapshot.data)
+
+        render_model = bracket_render_model(snapshot, actual_data)
+
+        round_of_16_match = next(
+            match
+            for match in render_model.matches
+            if match.round_label == "Round of 16"
+            and match.home_team_name == "Team A1"
+        )
+        self.assertEqual(round_of_16_match.home_status.state, "incorrect")
+        self.assertEqual(round_of_16_match.status.state, "incorrect")
+        self.assertEqual(render_model.champion_status.state, "incorrect")
+
+    def test_bracket_render_model_marks_absent_round_of_32_pick_incorrect(self) -> None:
+        snapshot = _snapshot()
+        actual_data = _actual_data_without_round_of_32_team(snapshot.data, "A1")
+
+        render_model = bracket_render_model(snapshot, actual_data)
+
+        opening_match = next(
+            match
+            for match in render_model.matches
+            if match.round_label == "Round of 32" and match.match_id == "R32-1"
+        )
+        self.assertEqual(opening_match.home_status.state, "incorrect")
+        self.assertEqual(opening_match.status.state, "incorrect")
+
     def test_bracket_render_model_marks_placement_bonus_statuses(self) -> None:
         snapshot = _snapshot()
 
@@ -125,6 +155,10 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         if not PIL_AVAILABLE:
             self.skipTest("Pillow is not installed in this Python environment.")
 
+        from io import BytesIO
+
+        from PIL import Image
+
         from world_cup_bot.ui.image_renderer import render_bracket_png, render_groups_png
 
         snapshot = _snapshot()
@@ -135,6 +169,8 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(groups_png.startswith(b"\x89PNG"))
         self.assertTrue(bracket_png.startswith(b"\x89PNG"))
+        bracket_image = Image.open(BytesIO(bracket_png))
+        self.assertLessEqual(bracket_image.size[0], 2054)
 
     def test_group_renderer_draws_flag_asset_when_svg_renderer_is_available(self) -> None:
         if not PIL_AVAILABLE:
@@ -464,6 +500,33 @@ def _actual_data_with_partial_round_of_32(
     actual_data = deepcopy(prediction_data)
     round_of_32 = deepcopy(actual_data["knockout"]["round_of_32"])
     actual_data["knockout"] = {"round_of_32": [round_of_32[0]]}
+    return actual_data
+
+
+def _actual_data_with_round_of_32_elimination(
+    prediction_data: dict[str, object],
+) -> dict[str, object]:
+    actual_data = deepcopy(prediction_data)
+    round_of_32 = deepcopy(actual_data["knockout"]["round_of_32"])
+    round_of_32[0]["winner_team_id"] = round_of_32[0]["away_team_id"]
+    actual_data["knockout"] = {"round_of_32": [round_of_32[0]]}
+    return actual_data
+
+
+def _actual_data_without_round_of_32_team(
+    prediction_data: dict[str, object],
+    team_id: str,
+) -> dict[str, object]:
+    actual_data = deepcopy(prediction_data)
+    seeded = deepcopy(actual_data["seeded_round_of_32"])
+    replacement_team_id = "A4"
+    for match in seeded:
+        if match["home_team_id"] == team_id:
+            match["home_team_id"] = replacement_team_id
+        if match["away_team_id"] == team_id:
+            match["away_team_id"] = replacement_team_id
+    actual_data["seeded_round_of_32"] = seeded
+    actual_data["knockout"] = {}
     return actual_data
 
 

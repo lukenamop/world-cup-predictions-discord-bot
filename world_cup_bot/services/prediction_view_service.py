@@ -407,8 +407,6 @@ def _knockout_pick_status(
     correct_label = f"+{_knockout_pick_points(round_name, rules)}"
     if _is_advancement_round(round_name):
         actual_matches = _actual_matches(model, actual_data, round_name)
-        if not actual_matches:
-            return RenderStatus(label="...", state="pending")
         for match in actual_matches:
             if team_id not in {match.home_team_id, match.away_team_id}:
                 continue
@@ -420,24 +418,32 @@ def _knockout_pick_status(
                 pending=False,
                 correct_label=correct_label,
             )
+        if _team_cannot_reach_round(
+            model,
+            actual_data,
+            team_id,
+            round_name,
+        ):
+            return RenderStatus(label="X", state="incorrect")
+        if actual_matches:
+            return RenderStatus(label="X", state="incorrect")
+        return RenderStatus(label="...", state="pending")
+
+    actual_matches = _actual_matches(model, actual_data, round_name)
+    for match in actual_matches:
+        if team_id not in {match.home_team_id, match.away_team_id}:
+            continue
         return _status(
             expected=team_id,
-            actual=None,
-            pending=False,
+            actual=match.winner_team_id,
+            pending=match.winner_team_id is None,
+            correct_label=correct_label,
         )
-
-    actual_winners = [
-        match.winner_team_id
-        for match in _actual_matches(model, actual_data, round_name)
-        if match.winner_team_id
-    ]
-    actual_winner = actual_winners[0] if actual_winners else None
-    return _status(
-        expected=team_id,
-        actual=actual_winner,
-        pending=actual_winner is None,
-        correct_label=correct_label,
-    )
+    if _team_cannot_reach_round(model, actual_data, team_id, round_name):
+        return RenderStatus(label="X", state="incorrect")
+    if actual_matches:
+        return RenderStatus(label="X", state="incorrect")
+    return RenderStatus(label="...", state="pending")
 
 
 def _knockout_team_status(
@@ -450,14 +456,16 @@ def _knockout_team_status(
     if round_name == "third_place":
         return _knockout_pick_status(model, actual_data, round_name, team_id, rules)
     actual_matches = _actual_matches(model, actual_data, round_name)
-    if not actual_matches:
-        return RenderStatus(label="...", state="pending")
     for match in actual_matches:
         if team_id in {match.home_team_id, match.away_team_id}:
             return RenderStatus(
                 label=f"+{_knockout_advancement_points(round_name, rules)}",
                 state="correct",
             )
+    if _team_cannot_reach_round(model, actual_data, team_id, round_name):
+        return RenderStatus(label="X", state="incorrect")
+    if not actual_matches:
+        return RenderStatus(label="...", state="pending")
     return RenderStatus(label="X", state="incorrect")
 
 
@@ -470,6 +478,12 @@ def _placement_status(
 ) -> RenderStatus:
     predicted = _placement_team_id(model, prediction_data, placement)
     actual = _placement_team_id(model, actual_data, placement)
+    if (
+        predicted is not None
+        and actual is None
+        and _placement_impossible(model, actual_data, predicted, placement)
+    ):
+        return RenderStatus(label="X", state="incorrect")
     return _status(
         expected=predicted or "",
         actual=actual,
@@ -503,6 +517,77 @@ def _is_advancement_round(round_name: str) -> bool:
         "quarter_finals",
         "semi_finals",
     }
+
+
+_MAIN_BRACKET_ROUNDS = (
+    "round_of_32",
+    "round_of_16",
+    "quarter_finals",
+    "semi_finals",
+    "final",
+)
+
+
+def _placement_impossible(
+    model: TournamentModel,
+    actual_data: Mapping[str, Any],
+    team_id: str,
+    placement: str,
+) -> bool:
+    if placement in {"champion", "runner_up"}:
+        return _team_cannot_reach_round(model, actual_data, team_id, "final")
+    return _team_cannot_reach_round(model, actual_data, team_id, "third_place")
+
+
+def _team_cannot_reach_round(
+    model: TournamentModel,
+    actual_data: Mapping[str, Any],
+    team_id: str,
+    round_name: str,
+) -> bool:
+    if round_name == "round_of_32":
+        return False
+    eliminated_in = _elimination_round(model, actual_data, team_id)
+    if round_name == "third_place":
+        if _team_won_round(model, actual_data, team_id, "semi_finals"):
+            return True
+        return (
+            eliminated_in in _MAIN_BRACKET_ROUNDS
+            and _MAIN_BRACKET_ROUNDS.index(eliminated_in)
+            < _MAIN_BRACKET_ROUNDS.index("semi_finals")
+        )
+    if (
+        round_name not in _MAIN_BRACKET_ROUNDS
+        or eliminated_in not in _MAIN_BRACKET_ROUNDS
+    ):
+        return False
+    return _MAIN_BRACKET_ROUNDS.index(eliminated_in) < _MAIN_BRACKET_ROUNDS.index(
+        round_name
+    )
+
+
+def _elimination_round(
+    model: TournamentModel,
+    actual_data: Mapping[str, Any],
+    team_id: str,
+) -> str | None:
+    for round_name in _MAIN_BRACKET_ROUNDS:
+        for match in _actual_matches(model, actual_data, round_name):
+            if match.loser_team_id == team_id:
+                return round_name
+    return None
+
+
+def _team_won_round(
+    model: TournamentModel,
+    actual_data: Mapping[str, Any],
+    team_id: str,
+    round_name: str,
+) -> bool:
+    return any(
+        match.winner_team_id == team_id
+        for match in _actual_matches(model, actual_data, round_name)
+    )
 
 
 def _knockout_advancement_points(round_name: str, rules: ScoringRules) -> int:

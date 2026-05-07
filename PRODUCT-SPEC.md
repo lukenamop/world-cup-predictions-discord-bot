@@ -235,7 +235,7 @@ Generated visuals are deterministic image attachments from stored prediction/res
 Visual outputs:
 
 - Group-stage prediction sheet showing each group, predicted order, predicted qualifiers, and correctness status.
-- One full 32-team knockout bracket image showing predicted path, winners, champion, runner-up, third place, and fourth place.
+- One full 32-team knockout bracket image showing predicted path, winners, champion, runner-up, and third place.
 - Result comparison view highlighting correct, incorrect, and pending/unplayed slots as live results arrive.
 
 Visual design:
