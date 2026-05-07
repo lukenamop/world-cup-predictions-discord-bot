@@ -33,14 +33,10 @@ class FoundationCog(commands.Cog):
             inline=True,
         )
         embed.add_field(
-            name="Commands",
+            name="Issues",
             value=(
-                "`/predict`, `/edit`, `/prediction`, `/groups`, `/bracket`, "
-                "`/preferences`, `/leaderboard`, `/rank`, `/points`, `/rules`, "
-                "`/admin setup`, `/admin config`, `/admin status`, "
-                "`/admin open`, `/admin close`, `/admin lock`, `/admin recalc`, "
-                "`/admin post info`, `/admin post leaderboard`, `/admin export`, "
-                "`/admin backup`"
+                "If something needs developer/operator attention, reach out to "
+                "@lukenamop on Discord or email lukenamop@gmail.com."
             ),
             inline=False,
         )

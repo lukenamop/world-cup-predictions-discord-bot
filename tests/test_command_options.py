@@ -125,6 +125,15 @@ class CommandOptionMetadataTests(unittest.TestCase):
                 "admin leaderboard posts should use non-paginated snapshot embeds.",
             )
 
+    def test_help_command_uses_support_contact_instead_of_command_dump(self) -> None:
+        source = (PROJECT_ROOT / "world_cup_bot" / "cogs" / "foundation.py").read_text()
+
+        self.assertNotIn('name="Commands"', source)
+        self.assertNotIn("`/predict`, `/edit`", source)
+        self.assertIn('name="Issues"', source)
+        self.assertIn("@lukenamop", source)
+        self.assertIn("lukenamop@gmail.com", source)
+
 
 def _command_functions(tree: ast.AST) -> list[ast.AsyncFunctionDef]:
     functions: list[ast.AsyncFunctionDef] = []

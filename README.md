@@ -4,7 +4,7 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 
 ## Current Command Surface
 
-- `/help` confirms the bot is online and lists the current prediction commands.
+- `/help` confirms the bot is online and shows developer/operator contact info for issues.
 - `/predict` starts a private guided prediction session and submits the bracket when completed.
 - `/edit` starts a private edit session for an already submitted prediction before lock. The last submitted bracket remains active until the edit session is completed and submitted.
 - `/prediction [user]` shows visible champion, runner-up, third-place, and point summary details.

@@ -188,7 +188,7 @@ Public/user commands:
 - `/points [user]`: shows detailed points.
 - `/preferences`: manages personal settings, including full-bracket sharing.
 - `/rules`: shows scoring and deadlines.
-- `/help`: shows command help.
+- `/help`: shows bot status and developer/operator contact info for issues.
 
 Admin commands:
 
