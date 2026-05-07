@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
+import random
 import unittest
+from pathlib import Path
 
 from world_cup_bot.domain.predictions import (
     ROUND_ORDER,
     TournamentModel,
     empty_prediction_data,
     get_round_matches,
+    is_submission_complete,
     next_prediction_step,
     record_group_pick,
     record_knockout_winner,
@@ -31,6 +35,11 @@ from world_cup_bot.services.result_sync_service import (
     ResultSyncServiceError,
     _map_live_results,
 )
+from world_cup_bot.services.sample_results import build_sample_results_through_round_of_16
+from world_cup_bot.services.sample_predictions import build_random_prediction_data
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class StandingsTests(unittest.TestCase):
@@ -270,6 +279,31 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(advancement["quarter_finals"], 0)
         self.assertEqual(advancement["semi_finals"], 0)
         self.assertEqual(advancement["final"], 0)
+
+    def test_generated_knockout_round_ids_are_contiguous(self) -> None:
+        model = TournamentModel.from_config(_prediction_config())
+        prediction = _complete_home_winner_prediction(model)
+
+        self.assertEqual(
+            [match.id for match in get_round_matches(model, prediction, "round_of_16")],
+            [f"R16-{index}" for index in range(1, 9)],
+        )
+
+    def test_sample_prediction_builder_generates_complete_valid_prediction(self) -> None:
+        model = TournamentModel.from_config(_prediction_config())
+
+        prediction = build_random_prediction_data(model, randomizer=random.Random(7))
+
+        self.assertTrue(is_submission_complete(model, prediction))
+        self.assertEqual(len(prediction["group_rankings"]), len(model.groups))
+        self.assertEqual(
+            len(prediction["third_place_qualifier_team_ids"]),
+            model.format.third_place_qualifiers,
+        )
+        self.assertEqual(
+            len(prediction["knockout"]["round_of_32"]),
+            model.format.opening_knockout_matches,
+        )
 
 
 class ResultSyncMappingTests(unittest.TestCase):
@@ -566,6 +600,31 @@ class ResultSyncMappingTests(unittest.TestCase):
         )
         self.assertEqual(skipped, ["ko-1"])
 
+    def test_sample_results_map_complete_through_round_of_16(self) -> None:
+        config = _canonical_tournament_config()
+        live_results = build_sample_results_through_round_of_16(config)
+
+        stored, skipped = _map_live_results(
+            provider_name="sample_live_sync",
+            tournament_config=config,
+            live_results=live_results,
+        )
+
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(live_results), 96)
+        self.assertEqual(
+            len([result for result in stored if result.stage == "group"]),
+            72,
+        )
+        self.assertEqual(
+            len([result for result in stored if result.round_name == "round_of_32"]),
+            16,
+        )
+        self.assertEqual(
+            len([result for result in stored if result.round_name == "round_of_16"]),
+            8,
+        )
+
 
 class ResultSyncServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_unsupported_provider_raises_service_error_before_sync_run(self) -> None:
@@ -816,6 +875,12 @@ def _simple_group_config() -> dict[str, object]:
         "bracket": {"round_of_32": []},
         "third_place_allocation": {"rules": []},
     }
+
+
+def _canonical_tournament_config() -> dict[str, object]:
+    return json.loads(
+        (PROJECT_ROOT / "config" / "tournaments" / "2026_world_cup.json").read_text()
+    )
 
 
 def _four_team_group_config() -> dict[str, object]:

@@ -1509,6 +1509,175 @@ class ResultRepository:
 
 
 @dataclass(frozen=True)
+class TournamentDataResetSummary:
+    guild_count: int
+    tournament_config_count: int
+    prediction_score_count: int
+    prediction_history_count: int
+    prediction_entry_count: int
+    match_result_count: int
+    sync_run_count: int
+    provider_cache_count: int
+    sync_warning_count: int
+    tie_breaker_count: int
+
+
+class TournamentDataResetRepository:
+    def __init__(self, pool: Any) -> None:
+        self.pool = pool
+
+    async def reset_active_tournament_data(
+        self,
+        *,
+        actor_user_id: str,
+    ) -> TournamentDataResetSummary:
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                rows = await connection.fetch(
+                    """
+                    select
+                        gts.guild_id,
+                        tc.id as tournament_config_id,
+                        tc.tournament_id,
+                        tc.config_hash
+                    from guild_tournament_state gts
+                    join tournament_configs tc
+                        on tc.id = gts.active_tournament_config_id
+                    order by gts.guild_id
+                    """
+                )
+                tournament_config_ids = [
+                    row["tournament_config_id"]
+                    for row in rows
+                ]
+                tournament_ids = sorted({row["tournament_id"] for row in rows})
+                config_hashes = sorted({row["config_hash"] for row in rows})
+                if not tournament_config_ids:
+                    summary = TournamentDataResetSummary(
+                        guild_count=0,
+                        tournament_config_count=0,
+                        prediction_score_count=0,
+                        prediction_history_count=0,
+                        prediction_entry_count=0,
+                        match_result_count=0,
+                        sync_run_count=0,
+                        provider_cache_count=0,
+                        sync_warning_count=0,
+                        tie_breaker_count=0,
+                    )
+                    await _insert_audit_log(
+                        connection,
+                        guild_id=None,
+                        actor_user_id=actor_user_id,
+                        action="operator_tournament_data_reset",
+                        details=_reset_summary_details(summary),
+                    )
+                    return summary
+
+                prediction_score_count = _affected_count(
+                    await connection.execute(
+                        """
+                        delete from prediction_scores
+                        where tournament_config_id = any($1::bigint[])
+                        """,
+                        tournament_config_ids,
+                    )
+                )
+                prediction_history_count = _affected_count(
+                    await connection.execute(
+                        """
+                        delete from prediction_history
+                        where prediction_entry_id in (
+                            select id
+                            from prediction_entries
+                            where tournament_config_id = any($1::bigint[])
+                        )
+                        """,
+                        tournament_config_ids,
+                    )
+                )
+                prediction_entry_count = _affected_count(
+                    await connection.execute(
+                        """
+                        delete from prediction_entries
+                        where tournament_config_id = any($1::bigint[])
+                        """,
+                        tournament_config_ids,
+                    )
+                )
+                match_result_count = _affected_count(
+                    await connection.execute(
+                        """
+                        delete from match_results
+                        where tournament_config_id = any($1::bigint[])
+                        """,
+                        tournament_config_ids,
+                    )
+                )
+                sync_run_count = _affected_count(
+                    await connection.execute(
+                        """
+                        delete from result_sync_runs
+                        where tournament_config_id = any($1::bigint[])
+                        """,
+                        tournament_config_ids,
+                    )
+                )
+                sync_warning_count = _affected_count(
+                    await connection.execute(
+                        """
+                        delete from result_sync_warnings
+                        where config_hash = any($1::text[])
+                        """,
+                        config_hashes,
+                    )
+                )
+                provider_cache_count = _affected_count(
+                    await connection.execute(
+                        """
+                        delete from provider_response_cache
+                        where config_hash = any($1::text[])
+                            and tournament_id = any($2::text[])
+                        """,
+                        config_hashes,
+                        tournament_ids,
+                    )
+                )
+                tie_breaker_count = _affected_count(
+                    await connection.execute(
+                        """
+                        delete from tie_breaker_adjudications
+                        where config_hash = any($1::text[])
+                            and tournament_id = any($2::text[])
+                        """,
+                        config_hashes,
+                        tournament_ids,
+                    )
+                )
+                summary = TournamentDataResetSummary(
+                    guild_count=len({row["guild_id"] for row in rows}),
+                    tournament_config_count=len(set(tournament_config_ids)),
+                    prediction_score_count=prediction_score_count,
+                    prediction_history_count=prediction_history_count,
+                    prediction_entry_count=prediction_entry_count,
+                    match_result_count=match_result_count,
+                    sync_run_count=sync_run_count,
+                    provider_cache_count=provider_cache_count,
+                    sync_warning_count=sync_warning_count,
+                    tie_breaker_count=tie_breaker_count,
+                )
+                await _insert_audit_log(
+                    connection,
+                    guild_id=None,
+                    actor_user_id=actor_user_id,
+                    action="operator_tournament_data_reset",
+                    details=_reset_summary_details(summary),
+                )
+
+        return summary
+
+
+@dataclass(frozen=True)
 class PredictionScore:
     prediction_entry_id: int
     guild_id: str
@@ -1718,6 +1887,28 @@ def _tie_breaker_audit_snapshot(row: Any) -> dict[str, object]:
         "actor_user_id": row["actor_user_id"],
         "created_at": row["created_at"].isoformat(),
     }
+
+
+def _reset_summary_details(summary: TournamentDataResetSummary) -> dict[str, object]:
+    return {
+        "guild_count": summary.guild_count,
+        "tournament_config_count": summary.tournament_config_count,
+        "prediction_score_count": summary.prediction_score_count,
+        "prediction_history_count": summary.prediction_history_count,
+        "prediction_entry_count": summary.prediction_entry_count,
+        "match_result_count": summary.match_result_count,
+        "sync_run_count": summary.sync_run_count,
+        "provider_cache_count": summary.provider_cache_count,
+        "sync_warning_count": summary.sync_warning_count,
+        "tie_breaker_count": summary.tie_breaker_count,
+    }
+
+
+def _affected_count(status: object) -> int:
+    try:
+        return int(str(status).split()[-1])
+    except (IndexError, ValueError):
+        return 0
 
 
 def _json_dict(value: Any) -> dict[str, Any]:

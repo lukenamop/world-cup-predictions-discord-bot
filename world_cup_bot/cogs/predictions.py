@@ -10,6 +10,7 @@ from discord.ext import commands
 from world_cup_bot.domain.predictions import (
     Group,
     ROUND_LABELS,
+    ROUND_ORDER,
     PredictionStep,
     PredictionValidationError,
     RoundMatch,
@@ -19,6 +20,7 @@ from world_cup_bot.domain.predictions import (
     next_prediction_step,
     prediction_progress,
     prediction_summary,
+    predicted_third_place_by_group,
     record_group_pick,
     record_knockout_winner,
     record_third_place_qualifiers,
@@ -300,6 +302,8 @@ class PredictionEntryView(discord.ui.View):
     def build_embed(self) -> discord.Embed:
         if self.cancelled:
             return self._cancelled_embed()
+        if self.finished:
+            return self._submitted_embed()
 
         model = self.session.model
         review_group = self._review_group()
@@ -350,11 +354,7 @@ class PredictionEntryView(discord.ui.View):
                 inline=False,
             )
         elif step.kind == "submit":
-            embed.add_field(
-                name="Prediction summary",
-                value=_format_summary(model, self.session.data),
-                inline=False,
-            )
+            _add_submission_review_fields(embed, model, self.session.data)
         else:
             embed.add_field(
                 name="Choices",
@@ -391,7 +391,21 @@ class PredictionEntryView(discord.ui.View):
         review_round_name = self._review_round_name()
         step = next_prediction_step(self.session.model, self.session.data)
         progress = prediction_progress(self.session.model, self.session.data)
-        if not review_group and not review_round_name and step.kind != "submit":
+        if not review_group and not review_round_name and step.kind == "submit":
+            edit_select = discord.ui.Select(
+                placeholder="Choose where to start editing",
+                min_values=1,
+                max_values=1,
+                row=0,
+                options=_edit_section_options(),
+            )
+
+            async def edit_select_callback(interaction: discord.Interaction) -> None:
+                await self._edit_section_callback(interaction, edit_select)
+
+            edit_select.callback = edit_select_callback
+            self.add_item(edit_select)
+        elif not review_group and not review_round_name and step.kind != "submit":
             select = discord.ui.Select(
                 placeholder=step.title[:100],
                 min_values=step.min_values,
@@ -423,7 +437,7 @@ class PredictionEntryView(discord.ui.View):
 
         if review_group or review_round_name:
             next_review_button = discord.ui.Button(
-                label="Next group" if step.kind == "group_pick" else "Next",
+                label="Next group" if review_group else "Next round",
                 style=discord.ButtonStyle.primary,
                 row=1,
             )
@@ -477,6 +491,22 @@ class PredictionEntryView(discord.ui.View):
                 step,
                 [str(value) for value in select.values],
             )
+        except PredictionValidationError as exc:
+            self.notice = str(exc)
+        await self._edit(interaction)
+
+    async def _edit_section_callback(
+        self,
+        interaction: discord.Interaction,
+        select: discord.ui.Select,
+    ) -> None:
+        if not select.values:
+            self.notice = "Choose a section to edit."
+            await self._edit(interaction)
+            return
+
+        try:
+            self._jump_to_edit_section(str(select.values[0]))
         except PredictionValidationError as exc:
             self.notice = str(exc)
         await self._edit(interaction)
@@ -602,6 +632,33 @@ class PredictionEntryView(discord.ui.View):
         )
         return embed
 
+    def _submitted_embed(self) -> discord.Embed:
+        progress = prediction_progress(self.session.model, self.session.data)
+        embed = discord.Embed(
+            title="Prediction Submitted",
+            description="Your prediction has been saved.",
+            color=discord.Color.green(),
+        )
+        embed.add_field(
+            name="Tournament",
+            value=self.session.model.name,
+            inline=True,
+        )
+        embed.add_field(
+            name="Progress",
+            value=f"{progress.completed}/{progress.total}",
+            inline=True,
+        )
+        embed.add_field(
+            name="Lock",
+            value=_format_deadline(self.session.state.lock_deadline_utc),
+            inline=True,
+        )
+        if self.notice:
+            embed.add_field(name="Status", value=self.notice[:1024], inline=False)
+        _add_submission_review_fields(embed, self.session.model, self.session.data)
+        return embed
+
     def _stage_or_apply_selection(self, step: PredictionStep, values: list[str]) -> None:
         if step.kind == "group_pick":
             self.session.data = self._apply_step(step, values)
@@ -703,6 +760,57 @@ class PredictionEntryView(discord.ui.View):
             )
         raise PredictionValidationError("This step is already complete.")
 
+    def _jump_to_edit_section(self, section: str) -> None:
+        self.pending_values = []
+        self.review_group_id = None
+        self.review_round_name = None
+
+        if section == "group_stage":
+            while True:
+                try:
+                    self.session.data = undo_last_prediction_step(
+                        self.session.model,
+                        self.session.data,
+                    )
+                except PredictionValidationError:
+                    break
+            first_group = (
+                self.session.model.groups[0].label
+                if self.session.model.groups
+                else "the group stage"
+            )
+            self.notice = f"Group stage picks reset. Continue from {first_group}."
+            return
+
+        labels = {
+            "third_place_qualifiers": "Third-place qualifiers",
+            **{round_name: ROUND_LABELS[round_name] for round_name in ROUND_ORDER},
+        }
+        if section not in labels:
+            raise PredictionValidationError("Choose a valid section to edit.")
+
+        while True:
+            step = next_prediction_step(self.session.model, self.session.data)
+            if (
+                section == "third_place_qualifiers"
+                and step.kind == "third_place"
+            ) or (
+                section in ROUND_ORDER
+                and step.kind == "knockout"
+                and step.round_name == section
+                and not self._round_entries(section)
+            ):
+                self.notice = f"{labels[section]} reset. Continue from here."
+                return
+
+            try:
+                self.session.data = undo_last_prediction_step(
+                    self.session.model,
+                    self.session.data,
+                )
+            except PredictionValidationError as exc:
+                raise PredictionValidationError("That section is not ready to edit yet.") from exc
+
 
 def _format_group_ranking(
     model: TournamentModel,
@@ -745,6 +853,85 @@ def _add_knockout_recap_fields(
     for index, chunk in enumerate(_chunk_field_lines(lines), start=1):
         name = label if index == 1 else f"{label} continued"
         embed.add_field(name=name, value=chunk, inline=False)
+
+
+def _add_submission_review_fields(
+    embed: discord.Embed,
+    model: TournamentModel,
+    data: dict[str, Any],
+) -> None:
+    embed.add_field(
+        name="Prediction summary",
+        value=_format_summary(model, data),
+        inline=False,
+    )
+    _add_group_stage_recap_fields(embed, model, data)
+    _add_third_place_recap_field(embed, model, data)
+    for round_name in ROUND_ORDER:
+        _add_knockout_recap_fields(embed, model, data, round_name)
+
+
+def _add_group_stage_recap_fields(
+    embed: discord.Embed,
+    model: TournamentModel,
+    data: dict[str, Any],
+) -> None:
+    lines = [
+        f"{group.label}: {_format_group_ranking_inline(model, data, group.id)}"
+        for group in model.groups
+    ]
+    for index, chunk in enumerate(_chunk_field_lines(lines), start=1):
+        name = "Group stage picks" if index == 1 else "Group stage picks continued"
+        embed.add_field(name=name, value=chunk, inline=False)
+
+
+def _add_third_place_recap_field(
+    embed: discord.Embed,
+    model: TournamentModel,
+    data: dict[str, Any],
+) -> None:
+    selected = data.get("third_place_qualifier_team_ids", [])
+    selected_ids = {str(team_id) for team_id in selected} if isinstance(selected, list) else set()
+    if not selected_ids:
+        embed.add_field(
+            name="Advancing third-place teams",
+            value="No picks recorded yet.",
+            inline=False,
+        )
+        return
+
+    try:
+        thirds_by_group = predicted_third_place_by_group(model, data)
+    except PredictionValidationError:
+        thirds_by_group = {}
+
+    lines = []
+    for group in model.groups:
+        team_id = thirds_by_group.get(group.id)
+        if team_id in selected_ids:
+            lines.append(f"{group.label}: {model.team(team_id).short_name}")
+    if not lines:
+        lines = [model.team(team_id).short_name for team_id in sorted(selected_ids)]
+    embed.add_field(
+        name="Advancing third-place teams",
+        value="\n".join(lines)[:1024],
+        inline=False,
+    )
+
+
+def _format_group_ranking_inline(
+    model: TournamentModel,
+    data: dict[str, Any],
+    group_id: str,
+) -> str:
+    rankings = data.get("group_rankings", {})
+    ranking = rankings.get(group_id, []) if isinstance(rankings, dict) else []
+    if not ranking:
+        return "No teams ranked yet."
+    return ", ".join(
+        f"{index}. {model.team(str(team_id)).short_name}"
+        for index, team_id in enumerate(ranking, start=1)
+    )
 
 
 def _format_knockout_match(model: TournamentModel, index: int, match: RoundMatch) -> str:
@@ -801,6 +988,51 @@ def _format_deadline(deadline: datetime | None) -> str:
     if deadline is None:
         return "First kickoff"
     return discord_datetime(deadline)
+
+
+def _edit_section_options() -> list[discord.SelectOption]:
+    return [
+        discord.SelectOption(
+            label="Group Stage Picks",
+            value="group_stage",
+            description="Restart group rankings and reseed the bracket.",
+        ),
+        discord.SelectOption(
+            label="Third-place Qualifiers",
+            value="third_place_qualifiers",
+            description="Choose the advancing third-place teams again.",
+        ),
+        discord.SelectOption(
+            label="Round of 32",
+            value="round_of_32",
+            description="Start at the first Round of 32 pick.",
+        ),
+        discord.SelectOption(
+            label="Round of 16",
+            value="round_of_16",
+            description="Start at the first Round of 16 pick.",
+        ),
+        discord.SelectOption(
+            label="Quarter-finals",
+            value="quarter_finals",
+            description="Start at the first quarter-final pick.",
+        ),
+        discord.SelectOption(
+            label="Semi-finals",
+            value="semi_finals",
+            description="Start at the first semi-final pick.",
+        ),
+        discord.SelectOption(
+            label="Third-place match",
+            value="third_place",
+            description="Start at the third-place match pick.",
+        ),
+        discord.SelectOption(
+            label="Final",
+            value="final",
+            description="Start at the final pick.",
+        ),
+    ]
 
 
 def _display_name(author: object) -> str:

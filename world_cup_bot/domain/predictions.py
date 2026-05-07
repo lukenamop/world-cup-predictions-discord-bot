@@ -545,11 +545,11 @@ def get_round_matches(
         return ()
     seeded = [
         {
-            "match_id": f"{_round_prefix(round_name)}-{index + 1}",
+            "match_id": f"{_round_prefix(round_name)}-{pair_index}",
             "home_team_id": winners[index],
             "away_team_id": winners[index + 1],
         }
-        for index in range(0, len(winners), 2)
+        for pair_index, index in enumerate(range(0, len(winners), 2), start=1)
     ]
     return _with_stored_winners(data, round_name, seeded)
 

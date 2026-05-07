@@ -10,14 +10,23 @@ from world_cup_bot.data.repositories import (
     AuditLogRepository,
     GuildActiveTournamentConfig,
     TieBreakerAdjudicationRepository,
+    TournamentDataResetRepository,
+    TournamentDataResetSummary,
     TournamentConfigRepository,
 )
 from world_cup_bot.domain.predictions import TournamentModel
 from world_cup_bot.jobs.result_sync import (
     ResultSyncFailure,
     ResultSyncJobReport,
+    seed_sample_results_all_active_guilds,
     sync_all_active_guilds,
 )
+from world_cup_bot.services.sample_predictions import (
+    SamplePredictionSeedError,
+    SamplePredictionSeedService,
+    SamplePredictionSeedSummary,
+)
+from world_cup_bot.services.sample_results import SAMPLE_RESULTS_PROVIDER
 
 
 LOGGER = logging.getLogger(__name__)
@@ -60,6 +69,109 @@ class OperatorCog(commands.Cog):
             )
         await ctx.respond(
             _sync_response_message(report),
+            ephemeral=True,
+        )
+
+    @operator.command(
+        name="seed-sample",
+        description="Seed sample official results through the Round of 16.",
+    )
+    async def seed_sample_command(self, ctx: discord.ApplicationContext) -> None:
+        if not await self._ensure_operator(ctx):
+            return
+
+        await ctx.defer(ephemeral=True)
+        report = await seed_sample_results_all_active_guilds(self.bot)
+        audit_log = AuditLogRepository(self.bot.database.pool)
+        for summary in report.summaries:
+            await audit_log.insert(
+                guild_id=summary.sync_run.guild_id,
+                actor_user_id=str(ctx.author.id),
+                action="operator_sample_results_seeded",
+                details={
+                    "sync_run_id": summary.sync_run.id,
+                    "tournament_config_id": summary.sync_run.tournament_config_id,
+                    "provider": summary.sync_run.provider,
+                    "fetched_match_count": summary.fetched_match_count,
+                    "applied_match_count": summary.applied_match_count,
+                    "skipped_match_count": summary.skipped_match_count,
+                    "warning_count": summary.warning_count,
+                },
+            )
+        await ctx.respond(
+            _sample_seed_response_message(report),
+            ephemeral=True,
+        )
+
+    @operator.command(
+        name="seed-predictions",
+        description="Seed 3 randomized fake predictions into a target guild.",
+    )
+    @discord.option(
+        "guild_id",
+        str,
+        description="Discord guild ID to receive the fake predictions.",
+    )
+    async def seed_predictions_command(
+        self,
+        ctx: discord.ApplicationContext,
+        guild_id: discord.Option(
+            str,
+            "Discord guild ID to receive the fake predictions.",
+        ),
+    ) -> None:
+        if not await self._ensure_operator(ctx):
+            return
+
+        normalized_guild_id = guild_id.strip()
+        if not normalized_guild_id:
+            await ctx.respond("Provide a target guild ID.", ephemeral=True)
+            return
+
+        await ctx.defer(ephemeral=True)
+        try:
+            summary = await SamplePredictionSeedService(
+                self.bot.database.pool
+            ).seed_fake_predictions(
+                guild_id=normalized_guild_id,
+            )
+        except SamplePredictionSeedError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+
+        await AuditLogRepository(self.bot.database.pool).insert(
+            guild_id=normalized_guild_id,
+            actor_user_id=str(ctx.author.id),
+            action="operator_sample_predictions_seeded",
+            details={
+                "tournament_config_id": summary.tournament_config_id,
+                "seeded_user_ids": [
+                    prediction.user_id
+                    for prediction in summary.seeded_predictions
+                ],
+                "recalculated_score_count": summary.recalculated_score_count,
+                "recalculation_error": summary.recalculation_error,
+            },
+        )
+        await ctx.respond(
+            _sample_predictions_response_message(summary),
+            ephemeral=True,
+        )
+
+    @operator.command(
+        name="reset-tournament",
+        description="Reset active tournament results and delete all predictions.",
+    )
+    async def reset_tournament_command(self, ctx: discord.ApplicationContext) -> None:
+        if not await self._ensure_operator(ctx):
+            return
+
+        await ctx.respond(
+            _reset_warning_message(),
+            view=_reset_confirmation_view(
+                bot=self.bot,
+                actor_user_id=str(ctx.author.id),
+            ),
             ephemeral=True,
         )
 
@@ -259,6 +371,108 @@ def _sync_response_message(report: ResultSyncJobReport) -> str:
     if failures:
         message += f" Failed guilds: {_format_failed_guilds(failures)}."
     return message
+
+
+def _sample_seed_response_message(report: ResultSyncJobReport) -> str:
+    message = _sync_response_message(report)
+    return (
+        f"Sample result seed used `{SAMPLE_RESULTS_PROVIDER}` and includes "
+        f"completed group, Round of 32, and Round of 16 results. {message}"
+    )
+
+
+def _sample_predictions_response_message(summary: SamplePredictionSeedSummary) -> str:
+    users = ", ".join(
+        f"{prediction.display_name} (`{prediction.user_id}`, rev {prediction.revision})"
+        for prediction in summary.seeded_predictions
+    )
+    recalc = (
+        f" Recalculated {summary.recalculated_score_count} score rows."
+        if summary.recalculated_score_count is not None
+        else f" Score recalculation was skipped: {summary.recalculation_error}"
+    )
+    return (
+        f"Seeded {len(summary.seeded_predictions)} randomized fake predictions "
+        f"for guild `{summary.guild_id}`. Users: {users}.{recalc}"
+    )
+
+
+def _reset_warning_message() -> str:
+    return (
+        "**Irreversible reset warning**\n"
+        "This will reset every active tournament config back to a no-results state, "
+        "delete all user predictions and prediction history, clear scores, remove "
+        "stored sync runs, provider caches, result warnings, and tie-breaker "
+        "adjudications. Guild setup and active tournament attachments stay in place."
+    )
+
+
+def _reset_complete_message(summary: TournamentDataResetSummary) -> str:
+    return (
+        "Tournament data reset complete. "
+        f"Guilds: {summary.guild_count}. "
+        f"Predictions deleted: {summary.prediction_entry_count}. "
+        f"History rows: {summary.prediction_history_count}. "
+        f"Scores: {summary.prediction_score_count}. "
+        f"Match results: {summary.match_result_count}. "
+        f"Sync runs: {summary.sync_run_count}. "
+        f"Provider caches: {summary.provider_cache_count}. "
+        f"Warnings: {summary.sync_warning_count}. "
+        f"Tie-breakers: {summary.tie_breaker_count}."
+    )
+
+
+def _reset_confirmation_view(*, bot: object, actor_user_id: str) -> object:
+    view = discord.ui.View(timeout=120)
+    confirm = discord.ui.Button(
+        label="Reset tournament data",
+        style=discord.ButtonStyle.danger,
+    )
+    cancel = discord.ui.Button(
+        label="Cancel",
+        style=discord.ButtonStyle.secondary,
+    )
+
+    async def confirm_callback(interaction: discord.Interaction) -> None:
+        if str(interaction.user.id) != actor_user_id:
+            await interaction.response.send_message(
+                "Only the operator who started this reset can confirm it.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.edit_message(
+            content="Resetting active tournament data...",
+            view=None,
+        )
+        summary = await TournamentDataResetRepository(
+            bot.database.pool
+        ).reset_active_tournament_data(
+            actor_user_id=actor_user_id,
+        )
+        await interaction.followup.send(
+            _reset_complete_message(summary),
+            ephemeral=True,
+        )
+        view.stop()
+
+    async def cancel_callback(interaction: discord.Interaction) -> None:
+        if str(interaction.user.id) != actor_user_id:
+            await interaction.response.send_message(
+                "Only the operator who started this reset can cancel it.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.edit_message(
+            content="Tournament reset cancelled.",
+            view=None,
+        )
+        view.stop()
+
+    confirm.callback = confirm_callback
+    cancel.callback = cancel_callback
+    view.add_item(confirm)
+    view.add_item(cancel)
+    return view
 
 
 def _format_failed_guilds(failures: Sequence[ResultSyncFailure]) -> str:

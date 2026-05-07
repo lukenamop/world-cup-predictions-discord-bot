@@ -299,6 +299,88 @@ class PredictionEntryViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["Next step"], "Run `/predict` again to start over.")
         self.assertNotIn("Current group ranking", fields)
 
+    async def test_submit_button_shows_submitted_terminal_embed(self) -> None:
+        view = _prediction_entry_view()
+        submit_service = _FakeSubmitService()
+        view.session.service = submit_service
+        view.session.data = _completed_prediction_data(view.session.model)
+        interaction = _FakeInteraction()
+
+        await view._submit_callback(interaction)
+
+        self.assertTrue(view.finished)
+        self.assertEqual(view.children, [])
+        self.assertEqual(submit_service.submit_calls, 1)
+        self.assertEqual(interaction.response.embed.title, "Prediction Submitted")
+        self.assertEqual(interaction.response.embed.description, "Your prediction has been saved.")
+        fields = {field.name: field.value for field in interaction.response.embed.fields}
+        self.assertEqual(fields["Status"], "Prediction submitted.")
+        self.assertIn("Champion:", fields["Prediction summary"])
+        self.assertIn("Team A1", fields["Group stage picks"])
+        self.assertIn("Group A: Team A3", fields["Advancing third-place teams"])
+        self.assertIn("1. Team A1 def. Team A2", fields["Round of 32"])
+
+    async def test_submit_review_shows_full_prediction_context_and_edit_dropdown(self) -> None:
+        view = _prediction_entry_view()
+        view.session.data = _completed_prediction_data(view.session.model)
+
+        embed = view.build_embed()
+        fields = {field.name: field.value for field in embed.fields}
+
+        self.assertEqual(embed.title, "Ready to Submit")
+        self.assertIn("Champion: Team A1", fields["Prediction summary"])
+        self.assertIn("Group A: 1. Team A1, 2. Team A2, 3. Team A3", fields["Group stage picks"])
+        self.assertIn("Group A: Team A3", fields["Advancing third-place teams"])
+        self.assertIn("1. Team A1 def. Team A2", fields["Round of 32"])
+        self.assertIn("1. Team A1 def. Team B1", fields["Round of 16"])
+        self.assertIn("1. Team A1 def. Team C1", fields["Quarter-finals"])
+        self.assertIn("1. Team A1 def. Team E1", fields["Semi-finals"])
+        self.assertIn("1. Team E1 def. Team A3", fields["Third-place match"])
+        self.assertIn("1. Team A1 def. Team I1", fields["Final"])
+
+        view._refresh_items()
+        selects = [item for item in view.children if getattr(item, "options", None)]
+        self.assertEqual(len(selects), 1)
+        self.assertEqual(selects[0].placeholder, "Choose where to start editing")
+        self.assertEqual(
+            [option.label for option in selects[0].options],
+            [
+                "Group Stage Picks",
+                "Third-place Qualifiers",
+                "Round of 32",
+                "Round of 16",
+                "Quarter-finals",
+                "Semi-finals",
+                "Third-place match",
+                "Final",
+            ],
+        )
+
+    async def test_edit_section_jump_rewinds_to_selected_knockout_round(self) -> None:
+        view = _prediction_entry_view()
+        view.session.data = _completed_prediction_data(view.session.model)
+
+        view._jump_to_edit_section("round_of_16")
+
+        step = next_prediction_step(view.session.model, view.session.data)
+        self.assertEqual(step.kind, "knockout")
+        self.assertEqual(step.round_name, "round_of_16")
+        self.assertEqual(len(view.session.data["knockout"]["round_of_32"]), 16)
+        self.assertNotIn("round_of_16", view.session.data["knockout"])
+        self.assertEqual(view.notice, "Round of 16 reset. Continue from here.")
+
+    async def test_edit_section_jump_rewinds_to_group_stage(self) -> None:
+        view = _prediction_entry_view()
+        view.session.data = _completed_prediction_data(view.session.model)
+
+        view._jump_to_edit_section("group_stage")
+
+        self.assertEqual(view.session.data, empty_prediction_data())
+        step = next_prediction_step(view.session.model, view.session.data)
+        self.assertEqual(step.kind, "group_pick")
+        self.assertEqual(step.group_id, "A")
+        self.assertEqual(view.notice, "Group stage picks reset. Continue from Group A.")
+
     async def test_knockout_selection_records_immediately(self) -> None:
         view = _prediction_entry_view()
         _advance_view_to_knockout_round(view, "round_of_32")
@@ -345,8 +427,9 @@ class PredictionEntryViewTests(unittest.IsolatedAsyncioTestCase):
             for item in view.children
             if getattr(item, "label", None) is not None
         ]
-        self.assertIn("Next", labels)
+        self.assertIn("Next round", labels)
         self.assertIn("Reset round", labels)
+        self.assertNotIn("Next", labels)
         self.assertFalse(any(getattr(item, "options", None) for item in view.children))
 
     async def test_next_from_knockout_recap_advances_to_next_round(self) -> None:
@@ -754,4 +837,12 @@ class _FakePredictionRepository:
         return self.entry
 
     async def submit_prediction(self, **kwargs: object) -> None:
+        self.submit_calls += 1
+
+
+class _FakeSubmitService:
+    def __init__(self) -> None:
+        self.submit_calls = 0
+
+    async def submit(self, **kwargs: object) -> None:
         self.submit_calls += 1

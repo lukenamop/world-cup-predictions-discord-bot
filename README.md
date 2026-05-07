@@ -159,7 +159,7 @@ Prediction entry is private and submit-based:
 - Group ranking is captured one position at a time so ordering is explicit.
 - The Round of 32 is seeded automatically from group predictions, selected third-place qualifiers, and the imported allocation table.
 - Completing `/predict` submits the bracket. There is no supported user-facing saved draft workflow.
-- `/edit` starts a replacement flow before lock. Existing submitted data is not replaced until the edit flow is complete and submitted.
+- `/edit` starts a replacement flow before lock. It opens on a full review of the submitted bracket and includes a dropdown to jump back to group picks, third-place qualifiers, or a specific knockout round. Existing submitted data is not replaced until the edit flow is complete and submitted.
 - Predictions lock at `/admin lock deadline_utc:...` when configured; otherwise the first imported fixture kickoff is used as the effective lock.
 
 Prediction storage keeps the latest submitted prediction and `prediction_history` revision rows. Any temporary in-progress state should be treated as an implementation detail, not a user-facing draft feature.
@@ -183,6 +183,20 @@ Manual sync:
 ```text
 /operator sync
 ```
+
+Operator test data tools:
+
+```text
+/operator seed-sample
+/operator seed-predictions guild_id:123456789012345678
+/operator reset-tournament
+```
+
+`/operator seed-sample` seeds deterministic official-looking results through the group stage, Round of 32, and Round of 16 for every active tournament config. It uses the same provider-cache, sync-run, result mapping, and leaderboard recalculation path as live sync, with `sample_live_sync` as the stored provider.
+
+`/operator seed-predictions` creates or replaces three fake submitted predictions in the supplied guild ID. The fake user IDs are stable so rerunning the command updates the same three entries, but each run generates new randomized, valid brackets through the normal prediction repository and then recalculates scores when possible.
+
+`/operator reset-tournament` posts an irreversible warning with a confirmation button. Confirming deletes all submitted predictions, prediction history, scores, match results, sync runs, provider caches, provider warnings, and tie-breaker adjudications for active tournament configs. Guild setup, scoring configuration, channels, and active tournament attachments are preserved so the league returns to a no-results/no-predictions state.
 
 The bot also starts a 30-minute background sync loop after startup. Scheduled sync does not fetch the provider endpoint before `2026-06-11T00:00:00Z`, the first matchday midnight in UTC. `/operator sync` is an explicit manual override and attempts a provider fetch even before that date. Once active, scheduled sync fetches once per provider/config feed, applies results to all configured guilds, writes `match_results` and `result_sync_runs`, caches provider response payloads for debugging, logs delayed-provider warnings once, and recalculates scores for submitted predictions.
 
@@ -260,6 +274,8 @@ The PM2 config runs `.venv/bin/python -m world_cup_bot.bot` directly and uses a 
 ## Migrations
 
 Migrations are plain numbered SQL files in `world_cup_bot/data/migrations`. They run automatically at bot startup and in `scripts/healthcheck.py`. Applied migration names are tracked in `schema_migrations`.
+
+Migration `010_normalize_generated_knockout_ids.sql` normalizes legacy generated knockout match IDs in stored predictions and prediction history after the Round of 16 ID format was made contiguous.
 
 ## Tests
 
