@@ -140,6 +140,14 @@ class OperatorSyncMessageTests(unittest.TestCase):
 
         self.assertIn("Fetched 208", message)
 
+    def test_sample_predictor_slots_map_to_fake_user_ids(self) -> None:
+        operator_module = _load_operator_module_with_fake_discord()
+
+        self.assertEqual(
+            operator_module._sample_predictor_user("2"),
+            ("990000000000000002", "Sample Predictor 2"),
+        )
+
 
 class AdminLockDeadlineParsingTests(unittest.TestCase):
     def test_parse_utc_datetime_accepts_zulu_utc(self) -> None:

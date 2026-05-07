@@ -34,7 +34,6 @@ FONT_PATH = (
 )
 BRACKET_COMPACT_OVERLAP = 46
 BRACKET_BADGE_WIDTH = 34
-BRACKET_STATUS_RAIL_WIDTH = 52
 BRACKET_BADGE_GAP = 10
 
 
@@ -467,8 +466,6 @@ def _draw_bracket_match(
         outline=GRID,
         width=1,
     )
-    rail_x = x + width - BRACKET_STATUS_RAIL_WIDTH
-    draw.line((rail_x, y + 6, rail_x, y + height - 6), fill=GRID, width=1)
     _draw_bracket_team_row(
         image,
         draw,
@@ -550,8 +547,6 @@ def _draw_champion_callout(
         outline=THIRD_PLACE,
         width=1,
     )
-    rail_x = x + callout_width - BRACKET_STATUS_RAIL_WIDTH
-    draw.line((rail_x, y + 12, rail_x, y + height - 12), fill=GRID, width=1)
     _draw_trophy_image(image, x + 18, y + 12, height=78)
     label_x = x + 80
     team_x = x + 152

@@ -210,6 +210,7 @@ Operator commands:
 - `/operator sync`: fetches live provider data once and applies it globally to all configured guilds.
 - `/operator seed-sample`: seeds deterministic sample official results through the Round of 16 globally, using the same mapping and scoring path as live result sync.
 - `/operator seed-predictions`: creates or replaces three randomized, valid fake prediction entries in a supplied guild ID for operator testing.
+- `/operator sample-bracket`: renders one of the seeded sample predictor brackets for a supplied guild ID.
 - `/operator reset-tournament`: after an irreversible button confirmation, deletes all predictions, prediction history, scores, stored results, sync runs, provider caches, result warnings, and tie-breaker adjudications for active tournament configs while preserving guild setup and tournament attachments.
 - `/operator resolve`: records an official adjudication for a group or best-third-place standings tie that cannot be resolved from deterministic match-result criteria available to the bot.
 

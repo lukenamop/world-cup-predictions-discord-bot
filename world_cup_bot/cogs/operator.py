@@ -22,11 +22,19 @@ from world_cup_bot.jobs.result_sync import (
     sync_all_active_guilds,
 )
 from world_cup_bot.services.sample_predictions import (
+    FAKE_PREDICTION_USERS,
     SamplePredictionSeedError,
     SamplePredictionSeedService,
     SamplePredictionSeedSummary,
 )
 from world_cup_bot.services.sample_results import SAMPLE_RESULTS_PROVIDER
+from world_cup_bot.services.prediction_view_service import (
+    PredictionSnapshot,
+    PredictionViewService,
+    PredictionViewServiceError,
+    bracket_render_model,
+    public_prediction_lines,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -155,6 +163,77 @@ class OperatorCog(commands.Cog):
         )
         await ctx.respond(
             _sample_predictions_response_message(summary),
+            ephemeral=True,
+        )
+
+    @operator.command(
+        name="sample-bracket",
+        description="Render one sample predictor bracket for a target guild.",
+    )
+    @discord.option(
+        "guild_id",
+        str,
+        description="Discord guild ID that has the sample prediction.",
+    )
+    @discord.option(
+        "predictor",
+        str,
+        description="Sample predictor slot to render.",
+        choices=["1", "2", "3"],
+    )
+    async def sample_bracket_command(
+        self,
+        ctx: discord.ApplicationContext,
+        guild_id: discord.Option(
+            str,
+            "Discord guild ID that has the sample prediction.",
+        ),
+        predictor: discord.Option(
+            str,
+            "Sample predictor slot to render.",
+            choices=["1", "2", "3"],
+        ),
+    ) -> None:
+        if not await self._ensure_operator(ctx):
+            return
+
+        normalized_guild_id = guild_id.strip()
+        if not normalized_guild_id:
+            await ctx.respond("Provide a target guild ID.", ephemeral=True)
+            return
+
+        user_id, display_name = _sample_predictor_user(predictor)
+        await ctx.defer(ephemeral=True)
+        service = PredictionViewService(self.bot.database.pool)
+        try:
+            snapshot = await service.snapshot(
+                guild_id=normalized_guild_id,
+                target_user_id=user_id,
+                viewer_user_id=str(ctx.author.id),
+            )
+            actual_data = await service.actual_data(
+                guild_id=normalized_guild_id,
+                tournament_config_id=snapshot.entry.tournament_config_id,
+                model=snapshot.model,
+            )
+        except PredictionViewServiceError as exc:
+            await ctx.respond(
+                (
+                    f"{exc} Run `/operator seed-predictions "
+                    f"guild_id:{normalized_guild_id}` first if this sample "
+                    "predictor has not been created."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        from world_cup_bot.ui.image_renderer import render_bracket_png
+
+        png = render_bracket_png(bracket_render_model(snapshot, actual_data))
+        filename = f"sample-bracket-{display_name.lower().replace(' ', '-')}.png"
+        await ctx.respond(
+            embed=_sample_bracket_embed(snapshot, predictor=predictor),
+            file=_discord_file(png, filename),
             ephemeral=True,
         )
 
@@ -395,6 +474,38 @@ def _sample_predictions_response_message(summary: SamplePredictionSeedSummary) -
         f"Seeded {len(summary.seeded_predictions)} randomized fake predictions "
         f"for guild `{summary.guild_id}`. Users: {users}.{recalc}"
     )
+
+
+def _sample_predictor_user(predictor: str) -> tuple[str, str]:
+    try:
+        index = int(predictor) - 1
+    except ValueError as exc:
+        raise ValueError("Sample predictor must be 1, 2, or 3.") from exc
+    if index < 0 or index >= len(FAKE_PREDICTION_USERS):
+        raise ValueError("Sample predictor must be 1, 2, or 3.")
+    return FAKE_PREDICTION_USERS[index]
+
+
+def _sample_bracket_embed(
+    snapshot: PredictionSnapshot,
+    *,
+    predictor: str,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"Sample Predictor {predictor} Bracket",
+        description="\n".join(public_prediction_lines(snapshot)),
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="Guild", value=snapshot.guild_id, inline=True)
+    embed.add_field(name="User ID", value=snapshot.target_user_id, inline=True)
+    embed.add_field(name="Tournament", value=snapshot.tournament_name, inline=True)
+    return embed
+
+
+def _discord_file(data: bytes, filename: str) -> discord.File:
+    from io import BytesIO
+
+    return discord.File(BytesIO(data), filename=filename)
 
 
 def _reset_warning_message() -> str:

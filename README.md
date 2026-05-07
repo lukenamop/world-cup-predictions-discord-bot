@@ -189,12 +189,15 @@ Operator test data tools:
 ```text
 /operator seed-sample
 /operator seed-predictions guild_id:123456789012345678
+/operator sample-bracket guild_id:123456789012345678 predictor:1
 /operator reset-tournament
 ```
 
 `/operator seed-sample` seeds deterministic official-looking results through the group stage, Round of 32, and Round of 16 for every active tournament config. It uses the same provider-cache, sync-run, result mapping, and leaderboard recalculation path as live sync, with `sample_live_sync` as the stored provider.
 
 `/operator seed-predictions` creates or replaces three fake submitted predictions in the supplied guild ID. The fake user IDs are stable so rerunning the command updates the same three entries, but each run generates new randomized, valid brackets through the normal prediction repository and then recalculates scores when possible.
+
+`/operator sample-bracket` renders a seeded sample predictor's knockout bracket image from the supplied guild ID. Use `predictor:1`, `predictor:2`, or `predictor:3` to choose which fake user to view.
 
 `/operator reset-tournament` posts an irreversible warning with a confirmation button. Confirming deletes all submitted predictions, prediction history, scores, match results, sync runs, provider caches, provider warnings, and tie-breaker adjudications for active tournament configs. Guild setup, scoring configuration, channels, and active tournament attachments are preserved so the league returns to a no-results/no-predictions state.
 
