@@ -28,7 +28,7 @@ from world_cup_bot.domain.predictions import (
     get_round_matches,
     prediction_summary,
 )
-from world_cup_bot.domain.scoring import actual_tournament_data
+from world_cup_bot.domain.scoring import ScoringRules, actual_tournament_data
 from world_cup_bot.domain.standings import MatchResult, StandingResolutionError
 
 
@@ -97,8 +97,10 @@ class BracketRenderMatch:
     match_id: str
     home_team_name: str
     home_flag_code: str | None
+    home_status: RenderStatus
     away_team_name: str
     away_flag_code: str | None
+    away_status: RenderStatus
     winner_team_name: str
     winner_flag_code: str | None
     status: RenderStatus
@@ -110,6 +112,9 @@ class BracketRenderModel:
     subtitle: str
     meta: tuple[str, ...]
     matches: tuple[BracketRenderMatch, ...]
+    champion_status: RenderStatus = RenderStatus(label="...", state="pending")
+    runner_up_status: RenderStatus = RenderStatus(label="...", state="pending")
+    third_place_status: RenderStatus | None = None
 
 
 class PredictionViewService:
@@ -320,6 +325,9 @@ def bracket_render_model(
     actual_data: Mapping[str, Any],
 ) -> BracketRenderModel:
     matches: list[BracketRenderMatch] = []
+    rules = ScoringRules.from_mapping(
+        snapshot.settings.scoring_rules if snapshot.settings else None
+    )
     for round_name in ROUND_ORDER:
         predicted_matches = get_round_matches(snapshot.model, snapshot.data, round_name)
         for match in predicted_matches:
@@ -330,6 +338,7 @@ def bracket_render_model(
                 actual_data,
                 round_name,
                 match.winner_team_id,
+                rules,
             )
             matches.append(
                 BracketRenderMatch(
@@ -337,8 +346,22 @@ def bracket_render_model(
                     match_id=match.id,
                     home_team_name=snapshot.model.team(match.home_team_id).short_name,
                     home_flag_code=snapshot.model.team(match.home_team_id).country_code,
+                    home_status=_knockout_team_status(
+                        snapshot.model,
+                        actual_data,
+                        round_name,
+                        match.home_team_id,
+                        rules,
+                    ),
                     away_team_name=snapshot.model.team(match.away_team_id).short_name,
                     away_flag_code=snapshot.model.team(match.away_team_id).country_code,
+                    away_status=_knockout_team_status(
+                        snapshot.model,
+                        actual_data,
+                        round_name,
+                        match.away_team_id,
+                        rules,
+                    ),
                     winner_team_name=snapshot.model.team(match.winner_team_id).short_name,
                     winner_flag_code=snapshot.model.team(match.winner_team_id).country_code,
                     status=status,
@@ -350,6 +373,27 @@ def bracket_render_model(
         subtitle=snapshot.tournament_name,
         meta=_snapshot_meta(snapshot),
         matches=tuple(matches),
+        champion_status=_placement_status(
+            snapshot.model,
+            snapshot.data,
+            actual_data,
+            "champion",
+            rules.champion,
+        ),
+        runner_up_status=_placement_status(
+            snapshot.model,
+            snapshot.data,
+            actual_data,
+            "runner_up",
+            rules.runner_up,
+        ),
+        third_place_status=_placement_status(
+            snapshot.model,
+            snapshot.data,
+            actual_data,
+            "third_place",
+            rules.third_place_winner,
+        ),
     )
 
 
@@ -358,7 +402,9 @@ def _knockout_pick_status(
     actual_data: Mapping[str, Any],
     round_name: str,
     team_id: str,
+    rules: ScoringRules,
 ) -> RenderStatus:
+    correct_label = f"+{_knockout_pick_points(round_name, rules)}"
     if _is_advancement_round(round_name):
         actual_matches = _actual_matches(model, actual_data, round_name)
         if not actual_matches:
@@ -372,6 +418,7 @@ def _knockout_pick_status(
                 expected=team_id,
                 actual=match.winner_team_id,
                 pending=False,
+                correct_label=correct_label,
             )
         return _status(
             expected=team_id,
@@ -389,7 +436,64 @@ def _knockout_pick_status(
         expected=team_id,
         actual=actual_winner,
         pending=actual_winner is None,
+        correct_label=correct_label,
     )
+
+
+def _knockout_team_status(
+    model: TournamentModel,
+    actual_data: Mapping[str, Any],
+    round_name: str,
+    team_id: str,
+    rules: ScoringRules,
+) -> RenderStatus:
+    if round_name == "third_place":
+        return _knockout_pick_status(model, actual_data, round_name, team_id, rules)
+    actual_matches = _actual_matches(model, actual_data, round_name)
+    if not actual_matches:
+        return RenderStatus(label="...", state="pending")
+    for match in actual_matches:
+        if team_id in {match.home_team_id, match.away_team_id}:
+            return RenderStatus(
+                label=f"+{_knockout_advancement_points(round_name, rules)}",
+                state="correct",
+            )
+    return RenderStatus(label="X", state="incorrect")
+
+
+def _placement_status(
+    model: TournamentModel,
+    prediction_data: Mapping[str, Any],
+    actual_data: Mapping[str, Any],
+    placement: str,
+    points: int,
+) -> RenderStatus:
+    predicted = _placement_team_id(model, prediction_data, placement)
+    actual = _placement_team_id(model, actual_data, placement)
+    return _status(
+        expected=predicted or "",
+        actual=actual,
+        pending=actual is None,
+        correct_label=f"+{points}",
+    )
+
+
+def _placement_team_id(
+    model: TournamentModel,
+    data: Mapping[str, Any],
+    placement: str,
+) -> str | None:
+    if placement in {"champion", "runner_up"}:
+        final = _actual_matches(model, data, "final")
+        if len(final) != 1 or final[0].winner_team_id is None:
+            return None
+        if placement == "champion":
+            return final[0].winner_team_id
+        return final[0].loser_team_id
+    third_place = _actual_matches(model, data, "third_place")
+    if len(third_place) != 1:
+        return None
+    return third_place[0].winner_team_id
 
 
 def _is_advancement_round(round_name: str) -> bool:
@@ -399,6 +503,25 @@ def _is_advancement_round(round_name: str) -> bool:
         "quarter_finals",
         "semi_finals",
     }
+
+
+def _knockout_advancement_points(round_name: str, rules: ScoringRules) -> int:
+    values = {
+        "round_of_32": rules.round_of_32_advancement,
+        "round_of_16": rules.round_of_16_advancement,
+        "quarter_finals": rules.quarter_final_advancement,
+        "semi_finals": rules.semi_final_advancement,
+        "final": rules.final_advancement,
+    }
+    return values.get(round_name, 0)
+
+
+def _knockout_pick_points(round_name: str, rules: ScoringRules) -> int:
+    values = {
+        "third_place": rules.third_place_winner,
+        "final": rules.champion,
+    }
+    return values.get(round_name, 0)
 
 
 def _actual_matches(
@@ -413,12 +536,7 @@ def _actual_matches(
 
 
 def _snapshot_meta(snapshot: PredictionSnapshot) -> tuple[str, ...]:
-    sync = (
-        f"Last sync {snapshot.latest_sync_run.finished_at:%Y-%m-%d %H:%M UTC}"
-        if snapshot.latest_sync_run and snapshot.latest_sync_run.finished_at
-        else "No completed sync"
-    )
-    return (sync,)
+    return ()
 
 
 def _status(

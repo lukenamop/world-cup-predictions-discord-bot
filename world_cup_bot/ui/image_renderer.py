@@ -5,7 +5,7 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from world_cup_bot.services.prediction_view_service import (
     BracketRenderModel,
@@ -16,7 +16,6 @@ from world_cup_bot.services.prediction_view_service import (
 
 BACKGROUND = "#171b22"
 PANEL = "#202631"
-PANEL_LIGHT = "#263040"
 TEXT = "#edf2f7"
 MUTED = "#aab4c0"
 GRID = "#343c49"
@@ -26,6 +25,7 @@ PENDING = "#8d98a8"
 ACCENT = "#5b8def"
 THIRD_PLACE = "#d5a640"
 FLAG_DIR = Path(__file__).resolve().parents[2] / "assets" / "flags"
+TROPHY_PATH = Path(__file__).resolve().parents[2] / "assets" / "trophy" / "world-cup-trophy.png"
 
 
 def render_groups_png(model: GroupSheetRenderModel) -> bytes:
@@ -119,6 +119,7 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
     draw = ImageDraw.Draw(image)
 
     _draw_header(draw, model.title, model.subtitle, model.meta, width, fonts)
+    _draw_bracket_legend(draw, width, fonts)
     left_columns = {
         "Round of 32": margin,
         "Round of 16": margin + (column_width + gap),
@@ -199,6 +200,19 @@ def render_bracket_png(model: BracketRenderModel) -> bytes:
             right_semis,
             final_box,
             column_width=column_width,
+        )
+        _draw_champion_callout(
+            image,
+            draw,
+            final,
+            third_place,
+            model.champion_status,
+            model.runner_up_status,
+            model.third_place_status,
+            final_x,
+            final_y - 196,
+            column_width,
+            fonts,
         )
     if third_place is not None:
         third_box = _PlacedMatch(third_place, final_x, third_y)
@@ -433,24 +447,12 @@ def _draw_bracket_match(
     height: int,
     fonts: dict[str, ImageFont.ImageFont],
 ) -> None:
-    status = getattr(match, "status")
-    outline = _status_color(status)
     draw.rounded_rectangle(
         (x, y, x + width, y + height),
         radius=7,
         fill=PANEL,
-        outline=outline,
+        outline=GRID,
         width=1,
-    )
-    home_is_winner = _is_match_winner(
-        match,
-        getattr(match, "home_team_name"),
-        getattr(match, "home_flag_code"),
-    )
-    away_is_winner = _is_match_winner(
-        match,
-        getattr(match, "away_team_name"),
-        getattr(match, "away_flag_code"),
     )
     _draw_bracket_team_row(
         image,
@@ -460,8 +462,7 @@ def _draw_bracket_match(
         width,
         getattr(match, "home_team_name"),
         getattr(match, "home_flag_code"),
-        home_is_winner,
-        status,
+        getattr(match, "home_status"),
         fonts,
     )
     _draw_bracket_team_row(
@@ -472,8 +473,7 @@ def _draw_bracket_match(
         width,
         getattr(match, "away_team_name"),
         getattr(match, "away_flag_code"),
-        away_is_winner,
-        status,
+        getattr(match, "away_status"),
         fonts,
     )
 
@@ -486,17 +486,9 @@ def _draw_bracket_team_row(
     width: int,
     name: str,
     flag_code: str | None,
-    is_winner: bool,
     status: RenderStatus,
     fonts: dict[str, ImageFont.ImageFont],
 ) -> None:
-    if is_winner:
-        draw.rounded_rectangle(
-            (x + 5, y - 1, x + width - 5, y + 24),
-            radius=5,
-            fill=PANEL_LIGHT,
-        )
-        draw.rectangle((x + 5, y - 1, x + 9, y + 24), fill=_status_color(status))
     _draw_team(
         image,
         draw,
@@ -505,31 +497,218 @@ def _draw_bracket_team_row(
         name,
         flag_code,
         fonts["small"],
-        fill=TEXT if is_winner else MUTED,
+        fill=TEXT if status.state == "correct" else MUTED,
     )
-    if is_winner:
-        _pill(
+    _bracket_status_badge(
+        draw,
+        x + width - 43,
+        y + 1,
+        status,
+        fonts["tiny"],
+    )
+
+
+def _draw_champion_callout(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    final: object,
+    third_place: object | None,
+    champion_status: RenderStatus,
+    runner_up_status: RenderStatus,
+    third_place_status: RenderStatus | None,
+    x: int,
+    y: int,
+    width: int,
+    fonts: dict[str, ImageFont.ImageFont],
+) -> None:
+    callout_width = max(width + 76, 326)
+    x -= (callout_width - width) // 2
+    height = 154 if third_place is not None else 124
+    box = (x, y, x + callout_width, y + height)
+    draw.rounded_rectangle(
+        box,
+        radius=8,
+        fill="#1d2430",
+        outline=THIRD_PLACE,
+        width=1,
+    )
+    _draw_trophy_image(image, x + 18, y + 12, height=78)
+    draw.text((x + 70, y + 16), "Champion", fill=THIRD_PLACE, font=fonts["small"])
+    champion_badge_x = x + callout_width - 54
+    _draw_team(
+        image,
+        draw,
+        x + 70,
+        y + 44,
+        getattr(final, "winner_team_name"),
+        getattr(final, "winner_flag_code"),
+        fonts["body"],
+        max_width=champion_badge_x - (x + 70) - 8,
+    )
+    _bracket_status_badge(
+        draw,
+        champion_badge_x,
+        y + 47,
+        champion_status,
+        fonts["tiny"],
+    )
+    draw.line((x + 16, y + 82, x + callout_width - 16, y + 82), fill=GRID, width=1)
+    runner_up_name, runner_up_flag = _match_loser(final)
+    _draw_placement_row(
+        image,
+        draw,
+        x + 18,
+        y + 96,
+        "2",
+        "Runner-up",
+        runner_up_name,
+        runner_up_flag,
+        runner_up_status,
+        callout_width,
+        fonts,
+    )
+    if third_place is not None:
+        _draw_placement_row(
+            image,
             draw,
-            x + width - 43,
-            y + 1,
-            _status_icon(status),
-            _status_color(status),
-            fonts["tiny"],
-            width=34,
-            height=22,
-            radius=6,
+            x + 18,
+            y + 124,
+            "3",
+            "Third",
+            getattr(third_place, "winner_team_name"),
+            getattr(third_place, "winner_flag_code"),
+            third_place_status or RenderStatus(label="...", state="pending"),
+            callout_width,
+            fonts,
         )
 
 
-def _is_match_winner(
-    match: object,
+def _draw_placement_row(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    rank: str,
+    label: str,
     team_name: str,
     flag_code: str | None,
-) -> bool:
-    return (
-        getattr(match, "winner_team_name") == team_name
-        and getattr(match, "winner_flag_code") == flag_code
+    status: RenderStatus,
+    width: int,
+    fonts: dict[str, ImageFont.ImageFont],
+) -> None:
+    draw.ellipse((x, y + 1, x + 20, y + 21), fill=GRID)
+    draw.text((x + 10, y + 11), rank, fill=TEXT, font=fonts["tiny"], anchor="mm")
+    draw.text((x + 30, y + 2), label, fill=MUTED, font=fonts["small"])
+    team_x = x + 128
+    badge_x = x + width - 72
+    _draw_team(
+        image,
+        draw,
+        team_x,
+        y,
+        team_name,
+        flag_code,
+        fonts["small"],
+        max_width=badge_x - team_x - 8,
     )
+    _bracket_status_badge(draw, badge_x, y + 1, status, fonts["tiny"])
+
+
+def _match_loser(match: object) -> tuple[str, str | None]:
+    home_name = getattr(match, "home_team_name")
+    home_flag = getattr(match, "home_flag_code")
+    away_name = getattr(match, "away_team_name")
+    away_flag = getattr(match, "away_flag_code")
+    winner_name = getattr(match, "winner_team_name")
+    winner_flag = getattr(match, "winner_flag_code")
+    if home_name == winner_name and home_flag == winner_flag:
+        return away_name, away_flag
+    return home_name, home_flag
+
+
+def _draw_bracket_legend(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    fonts: dict[str, ImageFont.ImageFont],
+) -> None:
+    x = width - 430
+    y = 36
+    items = (
+        (RenderStatus(label="+5", state="correct"), "points"),
+        (RenderStatus(label="X", state="incorrect"), "missed"),
+    )
+    draw.text((x, y + 3), "Icons", fill=MUTED, font=fonts["small"])
+    x += 58
+    for status, label in items:
+        _bracket_status_badge(draw, x, y, status, fonts["tiny"])
+        draw.text((x + 42, y + 3), label, fill=MUTED, font=fonts["small"])
+        x += 132
+
+
+def _bracket_status_badge(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    status: RenderStatus,
+    font: ImageFont.ImageFont,
+    *,
+    width: int = 34,
+    height: int = 22,
+) -> None:
+    if status.state == "pending":
+        return
+    color = _status_color(status)
+    draw.rounded_rectangle(
+        (x, y, x + width, y + height),
+        radius=6,
+        fill=color,
+    )
+    if status.state == "correct":
+        label = status.label if status.label.startswith("+") else "+"
+        draw.text((x + width // 2, y + height // 2), label, fill="#ffffff", font=font, anchor="mm")
+        return
+    if status.state == "incorrect":
+        _draw_x_icon(draw, x + width // 2, y + height // 2)
+        return
+
+
+def _draw_x_icon(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
+    draw.line((x - 5, y - 5, x + 5, y + 5), fill="#ffffff", width=2)
+    draw.line((x + 5, y - 5, x - 5, y + 5), fill="#ffffff", width=2)
+
+
+def _draw_trophy_image(image: Image.Image, x: int, y: int, *, height: int) -> None:
+    trophy = _trophy_image(height=height)
+    if trophy is None:
+        return
+    center_x = x + trophy.width // 2
+    center_y = y + trophy.height // 2
+    glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    glow_draw = ImageDraw.Draw(glow)
+    glow_draw.ellipse(
+        (
+            center_x - 34,
+            center_y - 42,
+            center_x + 34,
+            center_y + 42,
+        ),
+        fill=(213, 166, 64, 82),
+    )
+    glow = glow.filter(ImageFilter.GaussianBlur(16))
+    image.paste(glow, (0, 0), glow)
+    image.paste(trophy, (x, y), trophy)
+
+
+@lru_cache(maxsize=8)
+def _trophy_image(*, height: int) -> Image.Image | None:
+    if not TROPHY_PATH.exists():
+        return None
+    try:
+        source = Image.open(TROPHY_PATH).convert("RGBA")
+    except Exception:
+        return None
+    width = max(1, round(source.width * height / source.height))
+    return source.resize((width, height), Image.Resampling.LANCZOS)
 
 
 def _group_advancement_badge(row: object) -> tuple[str, str] | None:
@@ -663,13 +842,17 @@ def _draw_team(
     font: ImageFont.ImageFont,
     *,
     fill: str = TEXT,
+    max_width: int | None = None,
 ) -> None:
     flag = _flag_image(flag_code, width=28, height=20)
     text_x = x
+    text = name
     if flag is not None:
         image.paste(flag, (x, y + 3), flag)
         text_x += 36
-    draw.text((text_x, y), name, fill=fill, font=font)
+    if max_width is not None:
+        text = _fit_to_width(text, font, max_width - (text_x - x))
+    draw.text((text_x, y), text, fill=fill, font=font)
 
 
 def _draw_team_pair(
@@ -788,6 +971,19 @@ def _fit(value: str, limit: int) -> str:
     if len(value) <= limit:
         return value
     return value[: max(0, limit - 3)] + "..."
+
+
+def _fit_to_width(value: str, font: ImageFont.ImageFont, max_width: int) -> str:
+    if _text_width(value, font) <= max_width:
+        return value
+    ellipsis = "..."
+    if max_width <= _text_width(ellipsis, font):
+        return ""
+    for length in range(len(value), 0, -1):
+        candidate = value[:length].rstrip() + ellipsis
+        if _text_width(candidate, font) <= max_width:
+            return candidate
+    return ""
 
 
 def _png_bytes(image: Image.Image) -> bytes:

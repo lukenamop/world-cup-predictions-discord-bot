@@ -244,8 +244,8 @@ Visual design:
 - Simple, clear, sleek, and comfortable inside Discord.
 - High enough resolution for mobile users to zoom in.
 - Country flag icons next to country names.
-- Correct, incorrect, and pending states must be distinguishable without relying on color alone.
-- Include user, tournament, prediction status, lock status, and last result sync time.
+- Correct and incorrect states must be distinguishable without relying on color alone. Pending/unplayed bracket team rows may omit a status badge until points can be earned or missed.
+- Include user and tournament context in generated images. Prediction status, lock status, and last result sync time do not need to appear inside the image itself.
 - Provide concise text/embed summaries alongside image attachments for accessibility and load failures.
 
 ## MVP Milestones
@@ -313,8 +313,7 @@ Visual design:
 
 - Make scheduled sync use the operator-configured provider and active canonical
   tournament config for all configured guilds.
-- Scope latest sync status and prediction image sync metadata to the active
-  tournament config.
+- Scope latest sync status to the active tournament config.
 - Persist last successful sync state and enough cached provider response metadata
   to debug sync gaps without logging secrets.
 - Detect provider result delays beyond the allowed window and log a single warning

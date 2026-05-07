@@ -61,6 +61,7 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         render_model = group_sheet_render_model(snapshot, actual_data)
 
+        self.assertEqual(render_model.meta, ())
         group_a = render_model.groups[0]
         self.assertEqual(group_a.rows[0].status.state, "correct")
         self.assertEqual(group_a.rows[0].flag_code, "A1")
@@ -73,6 +74,7 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         render_model = bracket_render_model(snapshot, actual_data)
 
+        self.assertEqual(render_model.meta, ())
         shifted_match = next(
             match
             for match in render_model.matches
@@ -80,6 +82,9 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(shifted_match.winner_team_name, "Team A1")
         self.assertEqual(shifted_match.status.state, "correct")
+        self.assertEqual(shifted_match.home_status.state, "correct")
+        self.assertEqual(shifted_match.home_status.label, "+1")
+        self.assertEqual(shifted_match.away_status.state, "correct")
 
     def test_bracket_render_model_marks_finished_match_before_round_complete(self) -> None:
         snapshot = _snapshot()
@@ -99,6 +104,22 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(decided_match.status.state, "correct")
         self.assertEqual(later_match.status.state, "pending")
+        self.assertEqual(later_match.home_status.state, "correct")
+        self.assertEqual(later_match.home_status.label, "+1")
+        self.assertEqual(later_match.away_status.state, "correct")
+
+    def test_bracket_render_model_marks_placement_bonus_statuses(self) -> None:
+        snapshot = _snapshot()
+
+        render_model = bracket_render_model(snapshot, snapshot.data)
+
+        self.assertEqual(render_model.champion_status.state, "correct")
+        self.assertEqual(render_model.champion_status.label, "+25")
+        self.assertEqual(render_model.runner_up_status.state, "correct")
+        self.assertEqual(render_model.runner_up_status.label, "+15")
+        self.assertIsNotNone(render_model.third_place_status)
+        self.assertEqual(render_model.third_place_status.state, "correct")
+        self.assertEqual(render_model.third_place_status.label, "+10")
 
     def test_image_renderers_return_png_bytes(self) -> None:
         if not PIL_AVAILABLE:
@@ -152,6 +173,22 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(image.size, (1800, 448))
         self.assertNotEqual(image.getpixel((110, 220)), (32, 38, 49))
+
+    def test_bracket_renderer_fits_long_callout_team_names(self) -> None:
+        if not PIL_AVAILABLE:
+            self.skipTest("Pillow is not installed in this Python environment.")
+
+        from world_cup_bot.ui import image_renderer
+
+        font = image_renderer._fonts()["small"]
+        fitted = image_renderer._fit_to_width(
+            "Bosnia and Herzegovina",
+            font,
+            120,
+        )
+
+        self.assertLessEqual(image_renderer._text_width(fitted, font), 120)
+        self.assertNotEqual(fitted, "Bosnia and Herzegovina")
 
     def test_leaderboard_row_includes_champion_pick(self) -> None:
         ranked = RankedScore(

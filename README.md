@@ -172,7 +172,7 @@ Full brackets are private by default. A member can opt in to sharing full group 
 /preferences share_full_bracket:True
 ```
 
-Champion, runner-up, third-place picks, and available point totals remain visible through `/prediction [user]`. The generated `/groups` and `/bracket` images include accessible embed summaries, render checked-in flag SVG assets with CairoSVG/Pillow, and use explicit `OK`, `X`, and `...` status labels alongside colors so correctness does not rely on color alone.
+Champion, runner-up, third-place picks, and available point totals remain visible through `/prediction [user]`. The generated `/groups` and `/bracket` images include accessible embed summaries, render checked-in flag SVG assets with CairoSVG/Pillow, and use point/missed badges alongside colors so correctness does not rely on color alone. Pending bracket team rows omit the badge until points can be earned or missed. Images include user and tournament context; prediction status, lock status, and last result sync time can stay in surrounding Discord text instead of the image itself.
 
 ## Results And Scoring
 

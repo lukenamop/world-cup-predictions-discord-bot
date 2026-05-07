@@ -8,3 +8,4 @@ __pycache__/
 .ruff_cache/
 pm2.log
 dump.pm2
+.DS_Store
