@@ -16,8 +16,6 @@ from world_cup_bot.data.repositories import (
     StoredMatchResult,
     TieBreakerAdjudicationRepository,
     TournamentConfigRepository,
-    UserPreferences,
-    UserPreferencesRepository,
 )
 from world_cup_bot.domain.locks import effective_lock_deadline, is_prediction_locked
 from world_cup_bot.domain.predictions import (
@@ -45,7 +43,6 @@ class PredictionSnapshot:
     tournament_name: str
     model: TournamentModel
     settings: GuildSettings | None
-    preferences: UserPreferences
     entry: PredictionEntry
     data: dict[str, Any]
     score: PredictionScore | None
@@ -59,7 +56,7 @@ class PredictionSnapshot:
 
     @property
     def can_view_full_prediction(self) -> bool:
-        return self.is_own_prediction or self.preferences.share_full_bracket
+        return True
 
 
 @dataclass(frozen=True)
@@ -122,7 +119,6 @@ class PredictionViewService:
         self.settings = GuildSettingsRepository(pool)
         self.tournaments = TournamentConfigRepository(pool)
         self.predictions = PredictionRepository(pool)
-        self.preferences = UserPreferencesRepository(pool)
         self.results = ResultRepository(pool)
         self.scores = PredictionScoreRepository(pool)
         self.tie_breakers = TieBreakerAdjudicationRepository(pool)
@@ -161,14 +157,6 @@ class PredictionViewService:
             tournament_config_id=tournament.id,
             user_id=target_user_id,
         )
-        preferences = await self.preferences.get(
-            guild_id=guild_id,
-            user_id=target_user_id,
-        )
-        preferences = _preferences_with_guild_default(
-            preferences=preferences,
-            settings=settings,
-        )
         return PredictionSnapshot(
             guild_id=guild_id,
             viewer_user_id=viewer_user_id,
@@ -177,7 +165,6 @@ class PredictionViewService:
             tournament_name=tournament.tournament_name,
             model=model,
             settings=settings,
-            preferences=preferences,
             entry=entry,
             data=dict(entry.submitted_data),
             score=score,
@@ -222,36 +209,6 @@ class PredictionViewService:
                 f"resolved. {exc}"
             ) from exc
 
-    async def set_share_full_bracket(
-        self,
-        *,
-        guild_id: str,
-        user_id: str,
-        share_full_bracket: bool,
-    ) -> UserPreferences:
-        return await self.preferences.set_share_full_bracket(
-            guild_id=guild_id,
-            user_id=user_id,
-            share_full_bracket=share_full_bracket,
-        )
-
-
-def _preferences_with_guild_default(
-    *,
-    preferences: UserPreferences,
-    settings: GuildSettings | None,
-) -> UserPreferences:
-    if preferences.updated_at is not None or settings is None:
-        return preferences
-    return UserPreferences(
-        guild_id=preferences.guild_id,
-        user_id=preferences.user_id,
-        share_full_bracket=bool(
-            settings.privacy_defaults.get("share_full_bracket", False)
-        ),
-        updated_at=None,
-    )
-
 
 def public_prediction_lines(snapshot: PredictionSnapshot) -> tuple[str, ...]:
     try:
@@ -273,27 +230,17 @@ def full_view_summary(
     *,
     current_view: str = "summary",
 ) -> str:
-    if snapshot.preferences.share_full_bracket:
-        if current_view == "bracket":
-            return (
-                "Bracket image shown here. "
-                f"Use {_groups_command_hint(snapshot)} for groups."
-            )
-        if current_view == "groups":
-            return (
-                "Group image shown here. "
-                f"Use {_bracket_command_hint(snapshot)} for the bracket."
-            )
+    if current_view == "bracket":
         return (
-            "Bracket and group images are shared. "
-            f"Use {_bracket_command_hint(snapshot)} or {_groups_command_hint(snapshot)}."
+            "Bracket image shown here. "
+            f"Use {_groups_command_hint(snapshot)} for groups."
         )
-    if snapshot.is_own_prediction:
+    if current_view == "groups":
         return (
-            "Only you can view full bracket and group images. "
-            "Use `/preferences` to share them."
+            "Group image shown here. "
+            f"Use {_bracket_command_hint(snapshot)} for the bracket."
         )
-    return "Full bracket and group images are private."
+    return f"Use {_bracket_command_hint(snapshot)} or {_groups_command_hint(snapshot)}."
 
 
 def _bracket_command_hint(snapshot: PredictionSnapshot) -> str:

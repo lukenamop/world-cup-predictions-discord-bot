@@ -19,16 +19,7 @@ class GuildSettings:
     announcement_channel_id: str | None = None
     leaderboard_channel_id: str | None = None
     scoring_rules: dict[str, Any] = field(default_factory=dict)
-    privacy_defaults: dict[str, Any] = field(default_factory=dict)
     lock_mode: str = "full_bracket_lock"
-
-
-@dataclass(frozen=True)
-class UserPreferences:
-    guild_id: str
-    user_id: str
-    share_full_bracket: bool
-    updated_at: datetime | None = None
 
 
 class GuildSettingsRepository:
@@ -48,7 +39,6 @@ class GuildSettingsRepository:
                     lock_deadline_utc,
                     predictions_open,
                     scoring_rules,
-                    privacy_defaults,
                     lock_mode
                 from guild_settings
                 where guild_id = $1
@@ -68,7 +58,6 @@ class GuildSettingsRepository:
             lock_deadline_utc=row["lock_deadline_utc"],
             predictions_open=row["predictions_open"],
             scoring_rules=_json_dict(row["scoring_rules"]),
-            privacy_defaults=_json_dict(row["privacy_defaults"]),
             lock_mode=row["lock_mode"],
         )
 
@@ -90,21 +79,19 @@ class GuildSettingsRepository:
                         leaderboard_channel_id,
                         timezone,
                         scoring_rules,
-                        privacy_defaults,
                         live_results_provider,
                         lock_mode,
                         lock_deadline_utc,
                         predictions_open
                     )
                     values (
-                        $1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10
+                        $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9
                     )
                     on conflict (guild_id) do update set
                         announcement_channel_id = excluded.announcement_channel_id,
                         leaderboard_channel_id = excluded.leaderboard_channel_id,
                         timezone = excluded.timezone,
                         scoring_rules = excluded.scoring_rules,
-                        privacy_defaults = excluded.privacy_defaults,
                         live_results_provider = excluded.live_results_provider,
                         lock_mode = excluded.lock_mode,
                         lock_deadline_utc = excluded.lock_deadline_utc,
@@ -119,7 +106,6 @@ class GuildSettingsRepository:
                         lock_deadline_utc,
                         predictions_open,
                         scoring_rules,
-                        privacy_defaults,
                         lock_mode
                     """,
                     settings.guild_id,
@@ -127,7 +113,6 @@ class GuildSettingsRepository:
                     settings.leaderboard_channel_id,
                     settings.timezone,
                     json.dumps(settings.scoring_rules, sort_keys=True),
-                    json.dumps(settings.privacy_defaults, sort_keys=True),
                     settings.live_results_provider,
                     settings.lock_mode,
                     settings.lock_deadline_utc,
@@ -222,7 +207,6 @@ class GuildSettingsRepository:
                 lock_deadline_utc,
                 predictions_open,
                 scoring_rules,
-                privacy_defaults,
                 lock_mode
             """,
             guild_id,
@@ -310,7 +294,6 @@ class GuildSettingsRepository:
                 lock_deadline_utc,
                 predictions_open,
                 scoring_rules,
-                privacy_defaults,
                 lock_mode
             """,
             guild_id,
@@ -318,96 +301,6 @@ class GuildSettingsRepository:
             live_results_provider,
             lock_deadline_utc,
         )
-
-
-class UserPreferencesRepository:
-    def __init__(self, pool: Any) -> None:
-        self.pool = pool
-
-    async def list_for_guild(self, *, guild_id: str) -> list[UserPreferences]:
-        async with self.pool.acquire() as connection:
-            rows = await connection.fetch(
-                """
-                select
-                    guild_id,
-                    user_id,
-                    share_full_bracket,
-                    updated_at
-                from user_preferences
-                where guild_id = $1
-                order by user_id asc
-                """,
-                guild_id,
-            )
-
-        return [_row_to_user_preferences(row) for row in rows]
-
-    async def get(self, *, guild_id: str, user_id: str) -> UserPreferences:
-        async with self.pool.acquire() as connection:
-            row = await connection.fetchrow(
-                """
-                select
-                    guild_id,
-                    user_id,
-                    share_full_bracket,
-                    updated_at
-                from user_preferences
-                where guild_id = $1
-                    and user_id = $2
-                """,
-                guild_id,
-                user_id,
-            )
-
-        if row is None:
-            return UserPreferences(
-                guild_id=guild_id,
-                user_id=user_id,
-                share_full_bracket=False,
-                updated_at=None,
-            )
-        return _row_to_user_preferences(row)
-
-    async def set_share_full_bracket(
-        self,
-        *,
-        guild_id: str,
-        user_id: str,
-        share_full_bracket: bool,
-    ) -> UserPreferences:
-        async with self.pool.acquire() as connection:
-            row = await connection.fetchrow(
-                """
-                insert into user_preferences (
-                    guild_id,
-                    user_id,
-                    share_full_bracket
-                )
-                values ($1, $2, $3)
-                on conflict (guild_id, user_id) do update set
-                    share_full_bracket = excluded.share_full_bracket,
-                    updated_at = now()
-                returning
-                    guild_id,
-                    user_id,
-                    share_full_bracket,
-                    updated_at
-                """,
-                guild_id,
-                user_id,
-                share_full_bracket,
-            )
-
-        return _row_to_user_preferences(row)
-
-
-def _row_to_user_preferences(row: Any) -> UserPreferences:
-    return UserPreferences(
-        guild_id=row["guild_id"],
-        user_id=row["user_id"],
-        share_full_bracket=row["share_full_bracket"],
-        updated_at=row["updated_at"],
-    )
 
 
 def _row_to_guild_settings(row: Any) -> GuildSettings:
@@ -420,7 +313,6 @@ def _row_to_guild_settings(row: Any) -> GuildSettings:
         lock_deadline_utc=row["lock_deadline_utc"],
         predictions_open=row["predictions_open"],
         scoring_rules=_json_dict(row["scoring_rules"]),
-        privacy_defaults=_json_dict(row["privacy_defaults"]),
         lock_mode=row["lock_mode"],
     )
 

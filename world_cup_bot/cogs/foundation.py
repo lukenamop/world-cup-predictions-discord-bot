@@ -28,8 +28,8 @@ class FoundationCog(commands.Cog):
             inline=True,
         )
         embed.add_field(
-            name="Privacy",
-            value="Prediction flows are private.",
+            name="Entry",
+            value="Prediction entry uses private sessions.",
             inline=True,
         )
         embed.add_field(

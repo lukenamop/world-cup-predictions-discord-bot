@@ -11,7 +11,6 @@ from world_cup_bot.data.repositories import (
     PredictionScoreRepository,
     ResultRepository,
     TournamentConfigRepository,
-    UserPreferencesRepository,
 )
 
 
@@ -24,7 +23,6 @@ class ExportService:
         self.settings = GuildSettingsRepository(pool)
         self.tournaments = TournamentConfigRepository(pool)
         self.predictions = PredictionRepository(pool)
-        self.preferences = UserPreferencesRepository(pool)
         self.results = ResultRepository(pool)
         self.scores = PredictionScoreRepository(pool)
 
@@ -67,7 +65,6 @@ class ExportService:
             guild_id=guild_id,
             tournament_config_id=tournament.id,
         )
-        preferences = await self.preferences.list_for_guild(guild_id=guild_id)
         scores = await self.scores.list_scores(
             guild_id=guild_id,
             tournament_config_id=tournament.id,
@@ -86,7 +83,6 @@ class ExportService:
             "settings": _jsonable(settings),
             "active_tournament": _jsonable(tournament),
             "prediction_entries": [_jsonable(entry) for entry in entries],
-            "user_preferences": [_jsonable(preference) for preference in preferences],
             "prediction_scores": [_jsonable(score) for score in scores],
             "match_results": [_jsonable(result) for result in results],
             "recent_sync_runs": [_jsonable(run) for run in sync_runs],

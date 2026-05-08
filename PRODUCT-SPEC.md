@@ -10,11 +10,11 @@ The product should feel simple for casual users and reliable for admins. Users s
 
 ## Users And Scope
 
-- Server members submit predictions, track rank, review points, and optionally share full brackets.
+- Server members submit predictions, track rank, review points, and view bracket images.
 - Server admins configure league settings, channels, scoring, locks, tournament data, and result sync.
 - Bot operators deploy and monitor the bot.
 
-The bot supports multiple Discord guilds from day one. Each guild is its own league with separate settings, predictions, scoring, leaderboards, privacy preferences, and admin configuration.
+The bot supports multiple Discord guilds from day one. Each guild is its own league with separate settings, predictions, scoring, leaderboards, and admin configuration.
 
 ## Tournament Model
 
@@ -126,11 +126,11 @@ Leaderboard views include:
 
 Leaderboard ties use shared rank. Users with the same point total receive the same rank, and the next rank skips ahead by the number of tied users.
 
-### Sharing And Privacy
+### Prediction Visibility
 
-Full brackets are private unless the user chooses to share them through `/preferences`. Champion, runner-up, and third-place picks are visible immediately after submission, even before lock.
+Submitted group and bracket image views are available to server members through `/groups [user]` and `/bracket [user]`. Champion, runner-up, and third-place picks are visible immediately after submission, even before lock.
 
-The bot should only store Discord IDs, cached display names, prediction data, preferences, and operational data required for scoring/audit.
+The bot should only store Discord IDs, cached display names, prediction data, and operational data required for scoring/audit.
 
 ## Prediction Model
 
@@ -186,14 +186,13 @@ Public/user commands:
 - `/leaderboard`: shows current rankings.
 - `/rank [user]`: shows rank and point breakdown.
 - `/points [user]`: shows detailed points.
-- `/preferences`: manages personal settings, including full-bracket sharing.
 - `/rules`: shows scoring and deadlines.
 - `/help`: shows bot status and developer/operator contact info for issues.
 
 Admin commands:
 
 - `/admin setup`: configures prediction announcement channel, leaderboard channel, initial settings, optional UTC lock deadline, and canonical 2026 World Cup tournament data.
-- `/admin config`: views or updates scoring, privacy defaults, lock mode, UTC lock deadline, and configured channels.
+- `/admin config`: views or updates scoring, lock mode, UTC lock deadline, and configured channels.
 - `/admin open`: opens prediction entry.
 - `/admin close`: closes prediction entry without changing the configured lock deadline.
 - `/admin lock`: sets, views, or forces prediction locks.
@@ -285,7 +284,7 @@ Visual design:
 - Add leaderboard embeds and pagination.
 - Add user bracket/group views.
 - Add generated image views with result highlighting.
-- Add preferences, admin announcement, export, and backup workflows.
+- Add admin announcement, export, and backup workflows.
 - Tighten errors and documentation.
 
 ### 6. Launch Tournament Data
@@ -302,12 +301,12 @@ Visual design:
 ### 7. Admin Setup And Guild Configuration
 
 - Add `/admin setup` for prediction announcement channel, leaderboard channel,
-  initial privacy defaults, scoring defaults, and optional UTC lock deadline.
-- Add `/admin config` to view and update scoring rules, privacy defaults, lock
-  mode, UTC lock deadline, and configured channels after setup.
+  scoring defaults, and optional UTC lock deadline.
+- Add `/admin config` to view and update scoring rules, lock mode, UTC lock
+  deadline, and configured channels after setup.
 - Make `/admin post info` and `/admin post leaderboard` use configured
   channels by default while still allowing an explicit channel override.
-- Audit every admin change that mutates setup, scoring, privacy, lock,
+- Audit every admin change that mutates setup, scoring, lock,
   channel, tournament, result, export, or backup state.
 
 ### 8. Result Sync Production Hardening

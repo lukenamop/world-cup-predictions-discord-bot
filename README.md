@@ -1,6 +1,6 @@
 # World Cup Bracket Predictor Bot
 
-Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 10 work from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, canonical 2026 World Cup tournament configuration, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images with flags, preferences, guided admin setup/configuration, operator sync, admin posting, exports, and backups. Milestone 11 release readiness is tracked with the local release check and staging checklist below.
+Discord bot foundation for server-specific World Cup prediction leagues. The current implementation covers Milestone 10 work from `PRODUCT-SPEC.md`: configuration, startup logging, PostgreSQL persistence, canonical 2026 World Cup tournament configuration, private prediction submission flows, live result sync, scoring recalculation, leaderboards, prediction summaries, generated bracket/group images with flags, guided admin setup/configuration, operator sync, admin posting, exports, and backups. Milestone 11 release readiness is tracked with the local release check and staging checklist below.
 
 ## Current Command Surface
 
@@ -8,15 +8,14 @@ Discord bot foundation for server-specific World Cup prediction leagues. The cur
 - `/predict` starts a private guided prediction session and submits the bracket when completed.
 - `/edit` starts a private edit session for an already submitted prediction before lock. The last submitted bracket remains active until the edit session is completed and submitted.
 - `/prediction [user]` shows visible champion, runner-up, third-place, and point summary details.
-- `/groups [user]` renders a user's submitted group prediction image with result highlighting when the viewer is the owner or the user has shared full brackets.
-- `/bracket [user]` renders a user's submitted knockout bracket image with result highlighting when the viewer is the owner or the user has shared full brackets.
-- `/preferences [share_full_bracket]` views or updates whether other members can see full bracket and group images.
+- `/groups [user]` renders a user's submitted group prediction image with result highlighting.
+- `/bracket [user]` renders a user's submitted knockout bracket image with result highlighting.
 - `/leaderboard [page]` shows paginated shared-rank league standings.
 - `/rank [user]` shows a user's current shared rank and point totals after scores have been recalculated.
 - `/points [user]` shows a user's group/knockout point breakdown after scores have been recalculated.
 - `/rules` shows scoring and lock behavior.
-- `/admin setup <announcement_channel> <leaderboard_channel> [share_full_bracket_default] [lock_deadline_utc]` configures the server's prediction announcement channel, leaderboard channel, privacy default, default scoring, optional UTC lock deadline, and canonical 2026 World Cup tournament data.
-- `/admin config [...]` views or updates configured channels, privacy default, UTC lock deadline, and scoring values after setup.
+- `/admin setup <announcement_channel> <leaderboard_channel> [lock_deadline_utc]` configures the server's prediction announcement channel, leaderboard channel, default scoring, optional UTC lock deadline, and canonical 2026 World Cup tournament data.
+- `/admin config [...]` views or updates configured channels, UTC lock deadline, and scoring values after setup.
 - `/admin status` shows setup status for the current server, including active tournament data.
 - `/admin open` opens prediction entry.
 - `/admin close` closes prediction entry without changing the lock deadline.
@@ -164,15 +163,9 @@ Prediction entry is private and submit-based:
 
 Prediction storage keeps the latest submitted prediction and `prediction_history` revision rows. Any temporary in-progress state should be treated as an implementation detail, not a user-facing draft feature.
 
-## Prediction Views And Privacy
+## Prediction Views
 
-Full brackets are private by default. A member can opt in to sharing full group and bracket image views:
-
-```text
-/preferences share_full_bracket:True
-```
-
-Champion, runner-up, third-place picks, and available point totals remain visible through `/prediction [user]`. The generated `/groups` and `/bracket` images include accessible embed summaries, render checked-in flag SVG assets with CairoSVG/Pillow, and use point/missed badges alongside colors so correctness does not rely on color alone. Pending bracket team rows omit the badge until points can be earned or missed. Images include user and tournament context; prediction status, lock status, and last result sync time can stay in surrounding Discord text instead of the image itself.
+Champion, runner-up, third-place picks, and available point totals are visible through `/prediction [user]`. The generated `/groups [user]` and `/bracket [user]` images include accessible embed summaries, render checked-in flag SVG assets with CairoSVG/Pillow, and use point/missed badges alongside colors so correctness does not rely on color alone. Pending bracket team rows omit the badge until points can be earned or missed. Images include user and tournament context; prediction status, lock status, and last result sync time can stay in surrounding Discord text instead of the image itself.
 
 ## Results And Scoring
 
@@ -239,7 +232,6 @@ Use `/admin config` with no options to view current settings. Pass only the opti
 
 ```text
 /admin config lock_deadline_utc:2026-06-11T18:00:00Z
-/admin config share_full_bracket_default:False
 /admin config champion:30 runner_up:20
 ```
 
@@ -278,7 +270,7 @@ The PM2 config runs `.venv/bin/python -m world_cup_bot.bot` directly and uses a 
 
 Migrations are plain numbered SQL files in `world_cup_bot/data/migrations`. They run automatically at bot startup and in `scripts/healthcheck.py`. Applied migration names are tracked in `schema_migrations`.
 
-Migration `010_normalize_generated_knockout_ids.sql` normalizes legacy generated knockout match IDs in stored predictions and prediction history after the Round of 16 ID format was made contiguous.
+Migration `010_normalize_generated_knockout_ids.sql` normalizes legacy generated knockout match IDs in stored predictions and prediction history after the Round of 16 ID format was made contiguous. Migration `011_share_prediction_images.sql` removes obsolete visibility preference storage for the current command behavior.
 
 ## Tests
 
@@ -349,13 +341,13 @@ Run this manual flow in the staging guild and record any unexpected response:
 1. Run `/help` and confirm the bot responds.
 2. Run `/admin setup announcement_channel:#predictions leaderboard_channel:#leaderboard lock_deadline_utc:2026-06-11T18:00:00Z` and confirm the canonical 2026 tournament is attached.
 3. Run `/admin status` and verify setup, channels, lock, and tournament status.
-4. Run `/admin config` with no options and verify configured scoring, privacy default, and lock behavior.
+4. Run `/admin config` with no options and verify configured scoring and lock behavior.
 5. Run `/admin open` and verify prediction entry is open.
 6. Run `/admin post info`; confirm it posts league info and rules in the announcement channel.
 7. Run `/predict`, complete a full bracket, and confirm submission succeeds only after the final confirmation.
 8. Run `/prediction`, `/groups`, and `/bracket` for yourself; confirm concise embeds appear with image attachments for the image commands.
 9. Run `/edit`, change at least one submitted pick, complete the flow, and confirm the previous submission remains active until final confirmation.
-10. Run `/preferences share_full_bracket:True`; from another test user, run `/groups user:<submitter>` and `/bracket user:<submitter>` and confirm shared views are visible.
+10. From another test user, run `/groups user:<submitter>` and `/bracket user:<submitter>` and confirm image views are visible.
 11. Run `/leaderboard`, `/rank`, and `/points`; before official results, confirm empty or pending states are clear.
 12. Run `/operator sync` in the configured operator guild and verify it completes or reports provider availability clearly.
 13. Run `/admin recalc` and confirm it is idempotent when repeated.

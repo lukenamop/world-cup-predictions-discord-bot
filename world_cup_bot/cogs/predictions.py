@@ -60,7 +60,7 @@ class PredictionsCog(commands.Cog):
     @discord.option(
         "user",
         discord.Member,
-        description="Member whose public prediction summary to show.",
+        description="Member whose prediction summary to show.",
         required=False,
     )
     async def prediction_command(
@@ -68,7 +68,7 @@ class PredictionsCog(commands.Cog):
         ctx: discord.ApplicationContext,
         user: discord.Option(
             discord.Member,
-            "Member whose public prediction summary to show.",
+            "Member whose prediction summary to show.",
             required=False,
         ) = None,
     ) -> None:
@@ -95,9 +95,6 @@ class PredictionsCog(commands.Cog):
     ) -> None:
         snapshot = await self._snapshot_or_respond(ctx, user)
         if snapshot is None:
-            return
-        if not snapshot.can_view_full_prediction:
-            await ctx.respond(_private_prediction_message(snapshot), ephemeral=True)
             return
 
         await ctx.defer(ephemeral=True)
@@ -130,9 +127,6 @@ class PredictionsCog(commands.Cog):
         snapshot = await self._snapshot_or_respond(ctx, user)
         if snapshot is None:
             return
-        if not snapshot.can_view_full_prediction:
-            await ctx.respond(_private_prediction_message(snapshot), ephemeral=True)
-            return
 
         await ctx.defer(ephemeral=True)
         actual_data = await self._actual_data_or_respond(ctx, snapshot)
@@ -142,48 +136,6 @@ class PredictionsCog(commands.Cog):
         await ctx.respond(
             embed=_prediction_summary_embed(snapshot, current_view="bracket"),
             file=_discord_file(png, f"bracket-{snapshot.target_user_id}.png"),
-            ephemeral=True,
-        )
-
-    @discord.slash_command(name="preferences", description="Manage prediction sharing preferences.")
-    @discord.option(
-        "share_full_bracket",
-        bool,
-        description="Whether other members can view your full bracket and group images.",
-        required=False,
-    )
-    async def preferences_command(
-        self,
-        ctx: discord.ApplicationContext,
-        share_full_bracket: discord.Option(
-            bool,
-            "Whether other members can view your full bracket and group images.",
-            required=False,
-        ) = None,
-    ) -> None:
-        if ctx.guild is None:
-            await ctx.respond("Preferences can only be used in a server.", ephemeral=True)
-            return
-
-        service = PredictionViewService(self.bot.database.pool)
-        if share_full_bracket is None:
-            preferences = await service.preferences.get(
-                guild_id=str(ctx.guild.id),
-                user_id=str(ctx.author.id),
-            )
-        else:
-            preferences = await service.set_share_full_bracket(
-                guild_id=str(ctx.guild.id),
-                user_id=str(ctx.author.id),
-                share_full_bracket=share_full_bracket,
-            )
-
-        await ctx.respond(
-            (
-                "Full bracket sharing is "
-                f"{'on' if preferences.share_full_bracket else 'off'}. "
-                "Champion, runner-up, and third-place picks remain visible."
-            ),
             ephemeral=True,
         )
 
@@ -1051,7 +1003,7 @@ def _prediction_summary_embed(
         color=discord.Color.blurple(),
     )
     embed.add_field(
-        name="Full predictions",
+        name="Images",
         value=full_view_summary(snapshot, current_view=current_view),
         inline=False,
     )
@@ -1066,13 +1018,6 @@ def _prediction_summary_embed(
             inline=False,
         )
     return embed
-
-
-def _private_prediction_message(snapshot: PredictionSnapshot) -> str:
-    return (
-        f"{snapshot.display_name} keeps full brackets private. "
-        "Use `/prediction` for their visible placement picks."
-    )
 
 
 def _discord_file(content: bytes, filename: str) -> discord.File:

@@ -42,6 +42,7 @@ class CommandOptionMetadataTests(unittest.TestCase):
         defaults = _argument_defaults(setup_command)
 
         self.assertNotIn("clear_lock_deadline", defaults)
+        self.assertNotIn("share_full_bracket_default", defaults)
         self.assertNotIn("timezone_name", defaults)
         self.assertNotIn("lock_deadline_local", defaults)
         self.assertIsNone(defaults["announcement_channel"])

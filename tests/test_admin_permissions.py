@@ -229,7 +229,6 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             lock_deadline_utc=None,
             predictions_open=False,
             scoring_rules=admin_module._default_scoring_rules(),
-            privacy_defaults={"share_full_bracket": True},
             lock_mode=admin_module.LOCK_MODE,
         )
         tournament = admin_module.TournamentEmbedContext(
@@ -247,11 +246,7 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
 
         self.assertEqual(_field_value(embed, "Announcements"), "<#111>")
         self.assertEqual(_field_value(embed, "Leaderboard"), "<#222>")
-        self.assertIn(
-            "Prediction brackets public by default",
-            _field_value(embed, "Privacy default"),
-        )
-        self.assertIn("/preferences", _field_value(embed, "Privacy default"))
+        self.assertNotIn("Privacy default", [field.name for field in embed.fields])
         self.assertIn("Auto-locks at first kickoff", _field_value(embed, "Lock deadline"))
         self.assertIn("<t:1781204400:F>", _field_value(embed, "Lock deadline"))
         self.assertIn("<t:1781204400:R>", _field_value(embed, "Lock deadline"))
@@ -287,7 +282,6 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             lock_deadline_utc=datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc),
             announcement_channel_id="111",
             leaderboard_channel_id="222",
-            privacy_defaults={"share_full_bracket": False},
         )
         tournament = types.SimpleNamespace(
             tournament_id="fifa-world-cup-2026",
@@ -306,6 +300,7 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             "FIFA World Cup 2026\nConfig `fifa-world-cup-2026`, version `3b3023f182d9`",
         )
         self.assertNotIn("Data", [field.name for field in embed.fields])
+        self.assertNotIn("Privacy default", [field.name for field in embed.fields])
 
     def test_rules_embed_uses_public_scoring_copy(self) -> None:
         admin_module = _load_admin_module_with_fake_discord()
@@ -318,7 +313,6 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             lock_deadline_utc=None,
             predictions_open=False,
             scoring_rules=admin_module._default_scoring_rules(),
-            privacy_defaults={"share_full_bracket": False},
             lock_mode=admin_module.LOCK_MODE,
         )
         tournament = types.SimpleNamespace(tournament_name="FIFA World Cup 2026")
@@ -332,10 +326,7 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             "stage match.",
         )
         self.assertEqual(_field_value(embed, "Tournament"), "FIFA World Cup 2026")
-        self.assertEqual(
-            _field_value(embed, "Bracket visibility"),
-            "Full brackets are private by default. Use `/preferences` to share yours.",
-        )
+        self.assertNotIn("Bracket visibility", [field.name for field in embed.fields])
         self.assertEqual(
             _field_value(embed, "Group stage points"),
             "Group winner +3, group runner-up +2, advancing third-place team +1",
@@ -362,7 +353,6 @@ class AdminSetupConfigHelperTests(unittest.TestCase):
             lock_deadline_utc=datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc),
             predictions_open=True,
             scoring_rules=admin_module._default_scoring_rules(),
-            privacy_defaults={"share_full_bracket": False},
             lock_mode=admin_module.LOCK_MODE,
         )
         tournament = types.SimpleNamespace(tournament_name="FIFA World Cup 2026")

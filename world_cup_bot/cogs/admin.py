@@ -29,7 +29,6 @@ from world_cup_bot.services.tournament_import import (
 from world_cup_bot.ui.discord_formatting import discord_datetime
 
 
-DEFAULT_PRIVACY_DEFAULTS = {"share_full_bracket": False}
 LOCK_MODE = "full_bracket_lock"
 INFO_POST_NEXT_STEP = "Post public league info with `/admin post info`."
 
@@ -55,7 +54,7 @@ class AdminCog(commands.Cog):
 
     @admin.command(
         name="setup",
-        description="Configure this server's league channels, privacy, scoring, and lock.",
+        description="Configure this server's league channels, scoring, and lock.",
     )
     @discord.option(
         "announcement_channel",
@@ -66,12 +65,6 @@ class AdminCog(commands.Cog):
         "leaderboard_channel",
         discord.TextChannel,
         description="Text channel for leaderboard posts.",
-    )
-    @discord.option(
-        "share_full_bracket_default",
-        bool,
-        description="Default full-bracket sharing preference for new users.",
-        required=False,
     )
     @discord.option(
         "lock_deadline_utc",
@@ -90,11 +83,6 @@ class AdminCog(commands.Cog):
             discord.TextChannel,
             "Text channel for leaderboard posts.",
         ),
-        share_full_bracket_default: discord.Option(
-            bool,
-            "Default full-bracket sharing preference for new users.",
-            required=False,
-        ) = None,
         lock_deadline_utc: discord.Option(
             str,
             "UTC lock deadline like 2026-06-11T18:00:00Z.",
@@ -132,17 +120,6 @@ class AdminCog(commands.Cog):
                 if existing and existing.scoring_rules
                 else _default_scoring_rules()
             ),
-            privacy_defaults={
-                "share_full_bracket": (
-                    bool(share_full_bracket_default)
-                    if share_full_bracket_default is not None
-                    else (
-                        _share_full_bracket_default(existing.privacy_defaults)
-                        if existing
-                        else False
-                    )
-                )
-            },
             lock_mode=LOCK_MODE,
         )
         saved = await GuildSettingsRepository(
@@ -186,12 +163,6 @@ class AdminCog(commands.Cog):
         "leaderboard_channel",
         discord.TextChannel,
         description="Text channel for leaderboard posts.",
-        required=False,
-    )
-    @discord.option(
-        "share_full_bracket_default",
-        bool,
-        description="Default full-bracket sharing preference for new users.",
         required=False,
     )
     @discord.option(
@@ -300,11 +271,6 @@ class AdminCog(commands.Cog):
             "Text channel for leaderboard posts.",
             required=False,
         ) = None,
-        share_full_bracket_default: discord.Option(
-            bool,
-            "Default full-bracket sharing preference for new users.",
-            required=False,
-        ) = None,
         lock_deadline_utc: discord.Option(
             str,
             "UTC lock deadline like 2026-06-11T18:00:00Z.",
@@ -406,7 +372,6 @@ class AdminCog(commands.Cog):
         has_updates = _config_has_updates(
             announcement_channel=announcement_channel,
             leaderboard_channel=leaderboard_channel,
-            share_full_bracket_default=share_full_bracket_default,
             lock_deadline_utc=lock_deadline_utc,
             clear_lock_deadline=clear_lock_deadline,
             use_default_scoring=use_default_scoring,
@@ -477,13 +442,6 @@ class AdminCog(commands.Cog):
             lock_deadline_utc=lock_deadline_utc,
             predictions_open=baseline.predictions_open,
             scoring_rules=scoring_rules,
-            privacy_defaults={
-                "share_full_bracket": (
-                    bool(share_full_bracket_default)
-                    if share_full_bracket_default is not None
-                    else _share_full_bracket_default(baseline.privacy_defaults)
-                )
-            },
             lock_mode=LOCK_MODE,
         )
         saved = await GuildSettingsRepository(
@@ -883,7 +841,6 @@ def _new_default_settings(
         lock_deadline_utc=None,
         predictions_open=False,
         scoring_rules=_default_scoring_rules(),
-        privacy_defaults=dict(DEFAULT_PRIVACY_DEFAULTS),
         lock_mode=LOCK_MODE,
     )
 
@@ -994,7 +951,6 @@ def _config_has_updates(
     *,
     announcement_channel: object | None,
     leaderboard_channel: object | None,
-    share_full_bracket_default: bool | None,
     lock_deadline_utc: str | None,
     clear_lock_deadline: bool,
     use_default_scoring: bool,
@@ -1004,17 +960,12 @@ def _config_has_updates(
         (
             announcement_channel is not None,
             leaderboard_channel is not None,
-            share_full_bracket_default is not None,
             bool(lock_deadline_utc),
             clear_lock_deadline,
             use_default_scoring,
             any(value is not None for value in scoring_values),
         )
     )
-
-
-def _share_full_bracket_default(privacy_defaults: dict[str, object]) -> bool:
-    return bool(privacy_defaults.get("share_full_bracket", False))
 
 
 def _settings_audit_details(
@@ -1033,7 +984,6 @@ def _settings_snapshot(settings: GuildSettings) -> dict[str, object]:
         "announcement_channel_id": settings.announcement_channel_id,
         "leaderboard_channel_id": settings.leaderboard_channel_id,
         "timezone": settings.timezone,
-        "privacy_defaults": settings.privacy_defaults,
         "scoring_rules": settings.scoring_rules,
         "lock_mode": settings.lock_mode,
         "lock_deadline_utc": (
@@ -1092,19 +1042,6 @@ def _setup_embed(
         name="Leaderboard",
         value=_format_channel(settings.leaderboard_channel_id),
         inline=True,
-    )
-    embed.add_field(
-        name="Privacy default",
-        value=(
-            "Prediction brackets public by default\n"
-            "Users can change this with `/preferences`."
-            if _share_full_bracket_default(settings.privacy_defaults)
-            else (
-                "Prediction brackets private by default\n"
-                "Users can change this with `/preferences`."
-            )
-        ),
-        inline=False,
     )
     embed.add_field(
         name="Lock deadline",
@@ -1258,15 +1195,6 @@ def _status_embed(
         inline=True,
     )
     embed.add_field(
-        name="Privacy default",
-        value=(
-            "Prediction brackets public by default"
-            if settings and _share_full_bracket_default(settings.privacy_defaults)
-            else "Prediction brackets private by default"
-        ),
-        inline=True,
-    )
-    embed.add_field(
         name="Slash commands",
         value=command_sync_status,
         inline=True,
@@ -1286,15 +1214,6 @@ def _rules_embed(*, settings: object, tournament: object) -> discord.Embed:
     )
     if tournament is not None:
         embed.add_field(name="Tournament", value=tournament.tournament_name, inline=False)
-    embed.add_field(
-        name="Bracket visibility",
-        value=(
-            "Full brackets are public by default. Use `/preferences` to change yours."
-            if settings and _share_full_bracket_default(settings.privacy_defaults)
-            else "Full brackets are private by default. Use `/preferences` to share yours."
-        ),
-        inline=False,
-    )
     embed.add_field(
         name="Group stage points",
         value=(

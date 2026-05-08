@@ -11,7 +11,6 @@ from world_cup_bot.data.repositories import (
     PredictionEntry,
     PredictionScore,
     StoredMatchResult,
-    UserPreferences,
 )
 from world_cup_bot.cogs.leaderboard import leaderboard_embed
 from world_cup_bot.domain.predictions import (
@@ -48,14 +47,12 @@ else:
 
 
 class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
-    def test_privacy_allows_owner_or_shared_full_prediction_views(self) -> None:
-        owner_snapshot = _snapshot(viewer_user_id="user-1", share_full_bracket=False)
-        other_private = _snapshot(viewer_user_id="user-2", share_full_bracket=False)
-        other_shared = _snapshot(viewer_user_id="user-2", share_full_bracket=True)
+    def test_prediction_images_are_available_to_owner_and_other_members(self) -> None:
+        owner_snapshot = _snapshot(viewer_user_id="user-1")
+        other_snapshot = _snapshot(viewer_user_id="user-2")
 
         self.assertTrue(owner_snapshot.can_view_full_prediction)
-        self.assertFalse(other_private.can_view_full_prediction)
-        self.assertTrue(other_shared.can_view_full_prediction)
+        self.assertTrue(other_snapshot.can_view_full_prediction)
 
     def test_prediction_summary_lines_do_not_duplicate_point_total(self) -> None:
         snapshot = _snapshot(score=_score())
@@ -65,23 +62,20 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(lines), 3)
         self.assertTrue(all(not line.startswith("Points:") for line in lines))
 
-    def test_full_view_summary_mentions_image_commands_when_shared(self) -> None:
-        own_shared = _snapshot(viewer_user_id="user-1", share_full_bracket=True)
-        other_shared = _snapshot(viewer_user_id="user-2", share_full_bracket=True)
-        other_private = _snapshot(viewer_user_id="user-2", share_full_bracket=False)
+    def test_full_view_summary_mentions_image_commands(self) -> None:
+        own_snapshot = _snapshot(viewer_user_id="user-1")
+        other_snapshot = _snapshot(viewer_user_id="user-2")
 
-        self.assertIn("`/bracket`", full_view_summary(own_shared))
-        self.assertIn("`/groups`", full_view_summary(own_shared))
-        self.assertIn("`/bracket user:<member>`", full_view_summary(other_shared))
-        self.assertIn("`/groups user:<member>`", full_view_summary(other_shared))
-        self.assertNotIn("`/bracket", full_view_summary(other_private))
-        self.assertNotIn("`/groups", full_view_summary(other_private))
+        self.assertIn("`/bracket`", full_view_summary(own_snapshot))
+        self.assertIn("`/groups`", full_view_summary(own_snapshot))
+        self.assertIn("`/bracket user:<member>`", full_view_summary(other_snapshot))
+        self.assertIn("`/groups user:<member>`", full_view_summary(other_snapshot))
 
     def test_full_view_summary_omits_current_image_command(self) -> None:
-        own_shared = _snapshot(viewer_user_id="user-1", share_full_bracket=True)
+        own_snapshot = _snapshot(viewer_user_id="user-1")
 
-        bracket_summary = full_view_summary(own_shared, current_view="bracket")
-        groups_summary = full_view_summary(own_shared, current_view="groups")
+        bracket_summary = full_view_summary(own_snapshot, current_view="bracket")
+        groups_summary = full_view_summary(own_snapshot, current_view="groups")
 
         self.assertNotIn("`/bracket", bracket_summary)
         self.assertIn("`/groups`", bracket_summary)
@@ -440,12 +434,8 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("<@user-25>", embed.description)
         self.assertNotIn("<@user-26>", embed.description)
 
-    async def test_snapshot_uses_guild_privacy_default_for_missing_preference(self) -> None:
-        service = _view_service_with_privacy_default(
-            default_share_full_bracket=True,
-            preference_share_full_bracket=False,
-            preference_updated_at=None,
-        )
+    async def test_snapshot_allows_other_members_to_view_prediction_images(self) -> None:
+        service = _view_service()
 
         snapshot = await service.snapshot(
             guild_id="guild-1",
@@ -454,21 +444,6 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(snapshot.can_view_full_prediction)
-
-    async def test_snapshot_keeps_explicit_preference_over_guild_default(self) -> None:
-        service = _view_service_with_privacy_default(
-            default_share_full_bracket=True,
-            preference_share_full_bracket=False,
-            preference_updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        )
-
-        snapshot = await service.snapshot(
-            guild_id="guild-1",
-            target_user_id="user-1",
-            viewer_user_id="user-2",
-        )
-
-        self.assertFalse(snapshot.can_view_full_prediction)
 
     async def test_actual_data_reports_unresolved_tie_as_view_error(self) -> None:
         config = _prediction_config()
@@ -503,7 +478,6 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 def _snapshot(
     *,
     viewer_user_id: str = "user-1",
-    share_full_bracket: bool = False,
     score: PredictionScore | None = None,
 ) -> PredictionSnapshot:
     model = TournamentModel.from_config(_prediction_config())
@@ -530,11 +504,6 @@ def _snapshot(
         tournament_name="Test Cup",
         model=model,
         settings=None,
-        preferences=UserPreferences(
-            guild_id="guild-1",
-            user_id="user-1",
-            share_full_bracket=share_full_bracket,
-        ),
         entry=entry,
         data=data,
         score=score,
@@ -561,12 +530,7 @@ def _score() -> PredictionScore:
     )
 
 
-def _view_service_with_privacy_default(
-    *,
-    default_share_full_bracket: bool,
-    preference_share_full_bracket: bool,
-    preference_updated_at: datetime | None,
-) -> PredictionViewService:
+def _view_service() -> PredictionViewService:
     model = TournamentModel.from_config(_prediction_config())
     data = _complete_home_winner_prediction(model)
     submitted_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -605,15 +569,6 @@ def _view_service_with_privacy_default(
             live_results_provider="fifa_public_calendar",
             lock_deadline_utc=None,
             predictions_open=True,
-            privacy_defaults={"share_full_bracket": default_share_full_bracket},
-        )
-    )
-    service.preferences = _FakePreferencesRepository(
-        UserPreferences(
-            guild_id="guild-1",
-            user_id="user-1",
-            share_full_bracket=preference_share_full_bracket,
-            updated_at=preference_updated_at,
         )
     )
     service.results = _FakeResultRepository()
@@ -826,14 +781,6 @@ class _FakeSettingsRepository:
 
     async def get(self, guild_id: str) -> GuildSettings:
         return self.settings
-
-
-class _FakePreferencesRepository:
-    def __init__(self, preferences: UserPreferences) -> None:
-        self.preferences = preferences
-
-    async def get(self, *, guild_id: str, user_id: str) -> UserPreferences:
-        return self.preferences
 
 
 class _FakeResultRepository:
