@@ -20,6 +20,7 @@ class SettingsError(RuntimeError):
 class AppSettings:
     discord_token: str
     database_url: str
+    user_agent: str
     bot_env: str
     log_level: str
     owner_user_ids: frozenset[str]
@@ -37,12 +38,15 @@ class AppSettings:
         source = os.environ if env is None else env
         discord_token = _clean(source.get("DISCORD_TOKEN"))
         database_url = _clean(source.get("DATABASE_URL"))
+        user_agent = _clean(source.get("USER_AGENT"))
 
         missing: list[str] = []
         if require_secrets and not discord_token:
             missing.append("DISCORD_TOKEN")
         if require_secrets and not database_url:
             missing.append("DATABASE_URL")
+        if require_secrets and not user_agent:
+            missing.append("USER_AGENT")
         if missing:
             names = ", ".join(missing)
             raise SettingsError(f"Missing required environment variable(s): {names}")
@@ -59,6 +63,7 @@ class AppSettings:
         return cls(
             discord_token=discord_token or "",
             database_url=database_url or "",
+            user_agent=user_agent or "",
             bot_env=_clean(source.get("BOT_ENV")) or "development",
             log_level=log_level,
             owner_user_ids=_parse_owner_ids(source.get("OWNER_USER_IDS", "")),

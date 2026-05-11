@@ -4,6 +4,7 @@ import json
 import random
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from world_cup_bot.domain.predictions import (
     ROUND_ORDER,
@@ -309,6 +310,7 @@ class ScoringTests(unittest.TestCase):
 class ResultSyncMappingTests(unittest.TestCase):
     def test_fifa_public_calendar_url_uses_config_metadata(self) -> None:
         url = FifaPublicCalendarClient(
+            user_agent="WorldCupBot/1.0",
             base_url="https://example.test",
             match_count=104,
         )._matches_url(
@@ -331,6 +333,7 @@ class ResultSyncMappingTests(unittest.TestCase):
 
     def test_fifa_public_calendar_url_falls_back_to_fixture_dates(self) -> None:
         url = FifaPublicCalendarClient(
+            user_agent="WorldCupBot/1.0",
             base_url="https://example.test",
             match_count=104,
         )._matches_url(
@@ -352,6 +355,30 @@ class ResultSyncMappingTests(unittest.TestCase):
 
         self.assertIn("from=2026-06-11T00%3A00%3A00Z", url)
         self.assertIn("to=2026-07-19T23%3A59%3A59Z", url)
+
+    def test_fifa_public_calendar_request_uses_configured_user_agent(self) -> None:
+        captured_requests = []
+
+        def fake_urlopen(request: object, *, timeout: int) -> object:
+            captured_requests.append(request)
+            self.assertEqual(timeout, 20)
+            return _FakeFifaResponse()
+
+        client = FifaPublicCalendarClient(
+            user_agent="WorldCupBot/1.0 (contact: ops@example.com)",
+            base_url="https://example.test",
+        )
+
+        with patch("world_cup_bot.services.live_results_client.urlopen", fake_urlopen):
+            results = client._fetch_matches_sync("https://example.test/calendar/matches")
+
+        self.assertEqual(results, [])
+        headers = dict(captured_requests[0].header_items())
+        self.assertEqual(
+            headers["User-agent"],
+            "WorldCupBot/1.0 (contact: ops@example.com)",
+        )
+        self.assertEqual(headers["Accept"], "application/json")
 
     def test_fifa_public_calendar_parser_maps_result_fields(self) -> None:
         live_result = _parse_fifa_match(
@@ -655,6 +682,17 @@ class _ActiveTournament:
 class _UnexpectedResultRepo:
     async def start_sync_run(self, **kwargs: object) -> int:
         raise AssertionError("unsupported providers should not start sync runs")
+
+
+class _FakeFifaResponse:
+    def __enter__(self) -> "_FakeFifaResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return b'{"Results": []}'
 
 
 def _complete_home_winner_prediction(model: TournamentModel) -> dict[str, object]:

@@ -88,7 +88,7 @@ ecosystem.config.js
 - Keep a production-ready `ecosystem.config.js`.
 - PM2 should run the virtualenv Python directly, e.g. `.venv/bin/python -m world_cup_bot.bot`.
 - Load secrets from environment variables, never committed files.
-- Startup should fail clearly when `DISCORD_TOKEN` or required database configuration is missing.
+- Startup should fail clearly when `DISCORD_TOKEN`, `DATABASE_URL`, or `USER_AGENT` is missing.
 - Startup should log environment name, database target, guild count if known, and slash command sync status.
 - Use one production/global slash command sync path for MVP; do not add dev-guild-specific sync yet.
 - Do not require shell-specific startup behavior inside the Python app.
@@ -98,6 +98,7 @@ Environment variables:
 
 - `DISCORD_TOKEN`
 - `DATABASE_URL`
+- `USER_AGENT`
 - `BOT_ENV`
 - `LOG_LEVEL`
 - `OWNER_USER_IDS`

@@ -9,7 +9,10 @@ from world_cup_bot.settings import AppSettings, SettingsError, mask_database_url
 
 class SettingsTests(unittest.TestCase):
     def test_settings_require_token_and_database_url(self) -> None:
-        with self.assertRaisesRegex(SettingsError, "DISCORD_TOKEN, DATABASE_URL"):
+        with self.assertRaisesRegex(
+            SettingsError,
+            "DISCORD_TOKEN, DATABASE_URL, USER_AGENT",
+        ):
             AppSettings.from_env({}, require_secrets=True)
 
     def test_settings_parse_defaults_and_owner_ids(self) -> None:
@@ -19,12 +22,17 @@ class SettingsTests(unittest.TestCase):
                 "DATABASE_URL": (
                     "postgresql://world_cup_bot:secret@localhost:5432/world_cup_bot"
                 ),
+                "USER_AGENT": " WorldCupBot/1.0 (contact: ops@example.com) ",
                 "OWNER_USER_IDS": "123, 456,,",
                 "OPERATOR_GUILD_ID": "999",
             }
         )
 
         self.assertEqual(settings.discord_token, "token")
+        self.assertEqual(
+            settings.user_agent,
+            "WorldCupBot/1.0 (contact: ops@example.com)",
+        )
         self.assertEqual(settings.bot_env, "development")
         self.assertEqual(settings.log_level, "INFO")
         self.assertEqual(settings.owner_user_ids, frozenset({"123", "456"}))
@@ -38,6 +46,7 @@ class SettingsTests(unittest.TestCase):
                 {
                     "DISCORD_TOKEN": "token",
                     "DATABASE_URL": "postgresql://world_cup_bot@localhost/world_cup_bot",
+                    "USER_AGENT": "WorldCupBot/1.0",
                     "OPERATOR_GUILD_ID": "not-a-snowflake",
                 }
             )
@@ -48,6 +57,7 @@ class SettingsTests(unittest.TestCase):
                 {
                     "DISCORD_TOKEN": "token",
                     "DATABASE_URL": "postgresql://world_cup_bot@localhost/world_cup_bot",
+                    "USER_AGENT": "WorldCupBot/1.0",
                     "DEFAULT_TIMEZONE": "Not/AZone",
                 }
             )
@@ -58,6 +68,7 @@ class SettingsTests(unittest.TestCase):
                 {
                     "DISCORD_TOKEN": "token",
                     "DATABASE_URL": "postgresql://world_cup_bot@localhost/world_cup_bot",
+                    "USER_AGENT": "WorldCupBot/1.0",
                     "LOG_LEVEL": "chatty",
                 }
             )
@@ -68,6 +79,7 @@ class SettingsTests(unittest.TestCase):
                 {
                     "DISCORD_TOKEN": "token",
                     "DATABASE_URL": "postgresql://world_cup_bot:secret@localhost:5432",
+                    "USER_AGENT": "WorldCupBot/1.0",
                 }
             )
 
@@ -77,6 +89,7 @@ class SettingsTests(unittest.TestCase):
                 {
                     "DISCORD_TOKEN": "token",
                     "DATABASE_URL": "postgresql://localhost:5432/world_cup_bot",
+                    "USER_AGENT": "WorldCupBot/1.0",
                 }
             )
 

@@ -110,6 +110,8 @@ Official group and knockout results update automatically from a configured live 
 
 Preferred default provider: FIFA public calendar. It exposes the tournament fixture IDs used by the checked-in config and publishes score, status, and winner fields through the same calendar match feed. Public data is acceptable if observed result delay stays under 6 hours; if a score is delayed longer, log a single warning for that match or sync window to avoid warning floods.
 
+Operators must configure a `USER_AGENT` value for outbound provider API calls so publicly operated bot instances identify themselves and include operator contact information.
+
 Operators can trigger a global manual sync from the configured operator guild. Server admins can trigger recalculation from stored results, but normal operation should not require manual result entry.
 
 ### Leaderboards

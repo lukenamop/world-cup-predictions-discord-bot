@@ -168,6 +168,7 @@ Required environment variables:
 
 - `DISCORD_TOKEN`
 - `DATABASE_URL`
+- `USER_AGENT`, sent with external provider API requests; include a bot name/version and operator contact, for example `world-cup-predictions-discord-bot/1.0 (contact: you@example.com)`
 
 Optional environment variables:
 
@@ -281,7 +282,7 @@ python scripts/validate_tournament.py config/tournaments/2026_world_cup.json
 
 ### Live Results
 
-Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `fifa_public_calendar`. The FIFA provider calls the public calendar matches endpoint for the canonical tournament date window and stores any provider matches that map to fixture IDs.
+Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `fifa_public_calendar`. The FIFA provider calls the public calendar matches endpoint for the canonical tournament date window using the configured `USER_AGENT`, then stores any provider matches that map to fixture IDs.
 
 The bot starts a 30-minute background sync loop after startup. Scheduled sync does not fetch the provider endpoint before `2026-06-11T00:00:00Z`, the first matchday midnight in UTC. `/operator sync` is an explicit manual override and attempts a provider fetch even before that date.
 
@@ -329,14 +330,14 @@ python scripts/healthcheck.py
 
 Confirm these startup and process behaviors before release:
 
-- Missing `DISCORD_TOKEN` or `DATABASE_URL` fails startup with a clear configuration error.
+- Missing `DISCORD_TOKEN`, `DATABASE_URL`, or `USER_AGENT` fails startup with a clear configuration error.
 - A bad `DATABASE_URL` fails startup or health check clearly without logging secrets.
 - Normal startup logs environment name, masked database target, guild count when ready, and slash-command sync status.
 - `pm2 start ecosystem.config.js --env production` runs `.venv/bin/python -m world_cup_bot.bot`, restarts with delay, and shows the `world-cup-bot` process in `pm2 status`.
 
 ### Discord Staging Checklist
 
-Use a staging Discord application and guild. Populate `.env` locally with `DISCORD_TOKEN`, `DATABASE_URL`, `OPERATOR_GUILD_ID`, and `OWNER_USER_IDS` as needed. Invite the bot with application command permissions, then start it:
+Use a staging Discord application and guild. Populate `.env` locally with `DISCORD_TOKEN`, `DATABASE_URL`, `USER_AGENT`, `OPERATOR_GUILD_ID`, and `OWNER_USER_IDS` as needed. Invite the bot with application command permissions, then start it:
 
 ```bash
 . .venv/bin/activate

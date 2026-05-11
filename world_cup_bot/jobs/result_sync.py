@@ -59,6 +59,7 @@ async def sync_all_active_guilds(bot: Any) -> ResultSyncJobReport:
         sync_service = ResultSyncService(
             bot.database.pool,
             provider_name=bot.settings.live_results_provider,
+            user_agent=bot.settings.user_agent,
         )
         try:
             fetched = await sync_service.fetch_matches(tournament=tournament_group[0])

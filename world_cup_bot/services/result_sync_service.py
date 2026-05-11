@@ -67,12 +67,14 @@ class ResultSyncService:
         pool: Any,
         *,
         provider_name: str,
+        user_agent: str = "",
         client: LiveResultsClient | None = None,
     ) -> None:
         self.tournaments = TournamentConfigRepository(pool)
         self.results = ResultRepository(pool)
         self.tie_breakers = TieBreakerAdjudicationRepository(pool)
         self.provider_name = provider_name
+        self.user_agent = user_agent
         self.client = client
 
     async def sync_guild(self, *, guild_id: str) -> ResultSyncSummary:
@@ -254,6 +256,7 @@ class ResultSyncService:
         try:
             return self.client or create_live_results_client(
                 provider_name=self.provider_name,
+                user_agent=self.user_agent,
             )
         except LiveResultsError as exc:
             raise ResultSyncServiceError(str(exc)) from exc

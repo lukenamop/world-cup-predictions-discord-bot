@@ -34,17 +34,21 @@ class LiveResultsClient(Protocol):
 
 class FifaPublicCalendarClient:
     provider_name = "fifa_public_calendar"
-    user_agent = "WCPredictionsDiscordBot/1.0 (contact: lukenamop@gmail.com, interval: 30m)"
 
     def __init__(
         self,
         *,
+        user_agent: str,
         base_url: str = "https://api.fifa.com/api/v3",
         language: str = "en",
         match_count: int = 500,
         timeout_seconds: int = 20,
         max_attempts: int = 3,
     ) -> None:
+        cleaned_user_agent = user_agent.strip()
+        if not cleaned_user_agent:
+            raise LiveResultsError("USER_AGENT is required for FIFA calendar requests.")
+        self.user_agent = cleaned_user_agent
         self.base_url = base_url.rstrip("/")
         self.language = language
         self.match_count = match_count
@@ -114,9 +118,10 @@ class FifaPublicCalendarClient:
 def create_live_results_client(
     *,
     provider_name: str,
+    user_agent: str,
 ) -> LiveResultsClient:
     if provider_name == FifaPublicCalendarClient.provider_name:
-        return FifaPublicCalendarClient()
+        return FifaPublicCalendarClient(user_agent=user_agent)
     raise LiveResultsError(f"Unsupported live results provider: {provider_name}")
 
 
