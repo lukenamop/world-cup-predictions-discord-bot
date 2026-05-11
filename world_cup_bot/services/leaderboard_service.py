@@ -176,6 +176,26 @@ class LeaderboardService:
             guild_id=guild_id,
             tournament_config_id=tournament_config_id,
         )
+        score_by_entry_id = {score.prediction_entry_id: score for score in scores}
+        for entry in entries:
+            if entry.submitted_data is None or entry.id in score_by_entry_id:
+                continue
+            scores.append(
+                _unscored_prediction_score(
+                    entry,
+                    guild_id=guild_id,
+                    tournament_config_id=tournament_config_id,
+                    model=model,
+                )
+            )
+        scores.sort(
+            key=lambda score: (
+                -score.total_points,
+                score.recalculated_at,
+                score.display_name.casefold(),
+                score.user_id,
+            )
+        )
         champion_by_entry_id = _champion_names_by_entry_id(model, entries)
         ranked: list[RankedScore] = []
         previous_points: int | None = None
@@ -192,6 +212,62 @@ class LeaderboardService:
                 )
             )
         return ranked
+
+
+def _unscored_prediction_score(
+    entry: PredictionEntry,
+    *,
+    guild_id: str,
+    tournament_config_id: int,
+    model: TournamentModel,
+) -> PredictionScore:
+    breakdown = (
+        score_prediction(model, entry.submitted_data or {}, [])
+        if entry.submitted_data is not None
+        else None
+    )
+    score_time = (
+        entry.submitted_updated_at
+        or entry.submitted_at
+        or entry.draft_updated_at
+        or datetime.now(timezone.utc)
+    )
+    return PredictionScore(
+        prediction_entry_id=entry.id,
+        guild_id=guild_id,
+        tournament_config_id=tournament_config_id,
+        user_id=entry.user_id,
+        display_name=entry.display_name,
+        total_points=breakdown.total_points if breakdown else 0,
+        group_points=breakdown.group_points if breakdown else 0,
+        knockout_points=breakdown.knockout_points if breakdown else 0,
+        breakdown=breakdown.details if breakdown else _empty_score_details(),
+        scoring_version=SCORING_VERSION,
+        recalculated_at=score_time,
+    )
+
+
+def _empty_score_details() -> dict[str, Any]:
+    return {
+        "version": SCORING_VERSION,
+        "groups": {
+            "points": 0,
+            "group_positions": [],
+            "third_place_qualifier_hits": [],
+            "third_place_qualifier_points": 0,
+        },
+        "knockout": {
+            "points": 0,
+            "advancement": [],
+            "placements": {
+                "predicted": {},
+                "actual": {},
+                "third_place_points": 0,
+                "champion_points": 0,
+                "runner_up_points": 0,
+            },
+        },
+    }
 
 
 def _champion_names_by_entry_id(

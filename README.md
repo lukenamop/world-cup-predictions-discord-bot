@@ -348,7 +348,7 @@ Run this manual flow in the staging guild and record any unexpected response:
 8. Run `/prediction`, `/groups`, and `/bracket` for yourself; confirm concise embeds appear with image attachments for the image commands.
 9. Run `/edit`, change at least one submitted pick, complete the flow, and confirm the previous submission remains active until final confirmation.
 10. From another test user, run `/groups user:<submitter>` and `/bracket user:<submitter>` and confirm image views are visible.
-11. Run `/leaderboard`, `/rank`, and `/points`; before official results, confirm empty or pending states are clear.
+11. Run `/leaderboard`, `/rank`, and `/points`; before official results, confirm submitted predictors appear with zero or pending point details.
 12. Run `/operator sync` in the configured operator guild and verify it completes or reports provider availability clearly.
 13. Run `/admin recalc` and confirm it is idempotent when repeated.
 14. Run `/admin post leaderboard` and confirm it posts to the leaderboard channel.

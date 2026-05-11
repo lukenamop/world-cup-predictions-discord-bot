@@ -756,7 +756,7 @@ class AdminCog(commands.Cog):
                 limit=10,
             )
             if not scores:
-                raise ValueError("No leaderboard scores are available yet.")
+                raise ValueError("No submitted predictions are available yet.")
             return (leaderboard_embed(scores, snapshot=True),)
 
         settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)

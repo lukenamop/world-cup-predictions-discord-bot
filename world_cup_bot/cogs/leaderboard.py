@@ -51,7 +51,7 @@ class LeaderboardCog(commands.Cog):
 
         if not ranked_scores:
             await ctx.respond(
-                "No scores are available yet. Ask an admin to run `/admin recalc` after results are stored.",
+                "No submitted predictions are available yet.",
                 ephemeral=True,
             )
             return
@@ -95,7 +95,7 @@ class LeaderboardCog(commands.Cog):
 
         if ranked is None:
             await ctx.respond(
-                "No score is available for that user yet. Ask an admin to run `/admin recalc` after results are stored.",
+                "That user has not submitted a prediction yet.",
                 ephemeral=True,
             )
             return
@@ -134,7 +134,7 @@ class LeaderboardCog(commands.Cog):
 
         if ranked is None:
             await ctx.respond(
-                "No score is available for that user yet. Ask an admin to run `/admin recalc` after results are stored.",
+                "That user has not submitted a prediction yet.",
                 ephemeral=True,
             )
             return
