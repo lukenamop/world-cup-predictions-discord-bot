@@ -10,7 +10,9 @@ This README is organized by audience:
 
 ## Server Admins
 
-This section assumes the bot is already running, has been invited to your server, and has synced slash commands. Admin commands require Discord Manage Server permission by default. You can grant role or member overrides through Discord Server Settings > Integrations > Command Permissions.
+Admins can use the [public hosted bot](https://discord.com/oauth2/authorize?client_id=1501231434701078538) or self-host it with the operator setup instructions below.
+
+Admin commands require Discord Manage Server permission by default. You can grant role or member overrides through Discord Server Settings > Integrations > Command Permissions.
 
 ### Set Up A Tournament
 
