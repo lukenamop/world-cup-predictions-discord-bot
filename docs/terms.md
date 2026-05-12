@@ -1,3 +1,8 @@
+---
+title: Terms of Service
+permalink: /terms/
+---
+
 # Terms of Service
 
 Last updated May 12, 2026
@@ -50,7 +55,7 @@ prediction data, leaderboard scores, configuration settings, audit records, and
 operational data needed to provide the service.
 
 Additional details about collection, use, visibility, retention, and deletion
-are available in the [Privacy Policy](PRIVACY.md).
+are available in the [Privacy Policy]({{ "/privacy/" | relative_url }}).
 
 Do not submit sensitive personal information through the bot. The bot is not
 intended to collect passwords, payment details, government IDs, private
