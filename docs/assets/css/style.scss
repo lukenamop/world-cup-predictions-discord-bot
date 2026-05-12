@@ -1,0 +1,108 @@
+---
+---
+
+@import "{{ site.theme }}";
+
+:root {
+  color-scheme: dark light;
+  --page-bg: #111214;
+  --text-color: #e4e2dd;
+  --muted-color: #aaa49b;
+  --heading-color: #faf9f7;
+  --link-color: #5eead4;
+  --link-hover-color: #99f6e4;
+  --border-color: #34363a;
+  --code-bg: #1e2524;
+  --code-text: #f0eee9;
+  --selection-bg: #0f766e;
+  --selection-text: #ffffff;
+}
+
+body {
+  background: var(--page-bg);
+  color: var(--text-color);
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--selection-text);
+}
+
+a {
+  color: var(--link-color);
+}
+
+a:hover,
+a:focus {
+  color: var(--link-hover-color);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+strong,
+b {
+  color: var(--heading-color);
+}
+
+p,
+ul,
+ol,
+table,
+pre,
+dl {
+  color: var(--text-color);
+}
+
+blockquote {
+  border-left-color: var(--border-color);
+  color: var(--muted-color);
+}
+
+hr,
+table th,
+table td {
+  border-color: var(--border-color);
+}
+
+code,
+pre {
+  background: var(--code-bg);
+  color: var(--code-text);
+}
+
+pre {
+  border-color: var(--border-color);
+}
+
+header p,
+footer,
+small {
+  color: var(--muted-color);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light dark;
+    --page-bg: #fbfbfb;
+    --text-color: #282a2d;
+    --muted-color: #63666a;
+    --heading-color: #111214;
+    --link-color: #0f766e;
+    --link-hover-color: #115e59;
+    --border-color: #d9dddf;
+    --code-bg: #eef3f2;
+    --code-text: #24272a;
+    --selection-bg: #99f6e4;
+    --selection-text: #111214;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  img {
+    opacity: 0.95;
+  }
+}
