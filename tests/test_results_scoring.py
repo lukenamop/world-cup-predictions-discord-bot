@@ -458,7 +458,7 @@ class ResultSyncMappingTests(unittest.TestCase):
                 home_score=2,
                 away_score=1,
                 played_at=None,
-                payload={"id": 1001},
+                payload={"id": 1001, "LastUpdated": "changes-every-fetch"},
             )
         ]
 
@@ -471,6 +471,17 @@ class ResultSyncMappingTests(unittest.TestCase):
         self.assertEqual(skipped, [])
         self.assertEqual(stored[0].match_id, "fixture-1")
         self.assertEqual(stored[0].winner_team_id, "A1")
+        self.assertEqual(
+            stored[0].provider_payload,
+            {
+                "provider_match_id": "1001",
+                "status": "FINISHED",
+                "home_score": 2,
+                "away_score": 1,
+                "played_at": None,
+                "winner_side": None,
+            },
+        )
 
     def test_live_results_map_knockout_matches_from_configured_provider_ids(self) -> None:
         model = TournamentModel.from_config(_prediction_config())

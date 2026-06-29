@@ -349,7 +349,7 @@ def _map_live_results(
                         status=live_result.status,
                         winner_team_id=winner_team_id,
                         played_at=live_result.played_at or _fixture_kickoff(fixture),
-                        provider_payload=live_result.payload,
+                        provider_payload=_stored_provider_payload(live_result),
                     )
                 )
                 if winner_team_id:
@@ -404,8 +404,19 @@ def _stored_group_result(
             winner_side=live_result.winner_side,
         ),
         played_at=live_result.played_at or _fixture_kickoff(fixture),
-        provider_payload=live_result.payload,
+        provider_payload=_stored_provider_payload(live_result),
     )
+
+
+def _stored_provider_payload(live_result: LiveMatchResult) -> dict[str, Any]:
+    return {
+        "provider_match_id": live_result.provider_match_id,
+        "status": live_result.status,
+        "home_score": live_result.home_score,
+        "away_score": live_result.away_score,
+        "played_at": live_result.played_at.isoformat() if live_result.played_at else None,
+        "winner_side": live_result.winner_side,
+    }
 
 
 def _to_domain_result(result: StoredMatchResult) -> MatchResult:

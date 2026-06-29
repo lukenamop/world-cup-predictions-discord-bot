@@ -106,7 +106,7 @@ class CommandOptionMetadataTests(unittest.TestCase):
                 "leaderboard_command ctx.respond calls should be ephemeral.",
             )
 
-    def test_admin_post_leaderboard_uses_snapshot_message(self) -> None:
+    def test_admin_post_leaderboard_uses_snapshot_embeds(self) -> None:
         tree = ast.parse(
             (PROJECT_ROOT / "world_cup_bot" / "cogs" / "admin.py").read_text()
         )
@@ -115,15 +115,15 @@ class CommandOptionMetadataTests(unittest.TestCase):
         self.assertFalse(defaults["full"].value)
 
         announcement_payload = _async_function_by_name(tree, "_announcement_payload")
-        leaderboard_message_calls = [
+        leaderboard_embed_calls = [
             node
             for node in ast.walk(announcement_payload)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "leaderboard_snapshot_messages"
+            and node.func.id == "leaderboard_snapshot_embeds"
         ]
 
-        self.assertGreater(len(leaderboard_message_calls), 0)
+        self.assertGreater(len(leaderboard_embed_calls), 0)
 
     def test_help_command_uses_support_contact_instead_of_command_dump(self) -> None:
         source = (PROJECT_ROOT / "world_cup_bot" / "cogs" / "foundation.py").read_text()

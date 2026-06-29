@@ -122,9 +122,10 @@ Champion, runner-up, third-place picks, and available point totals are visible t
 
 Leaderboard ties use shared rank. Users with the same point total receive the same rank, and the next rank skips ahead by the number of tied users.
 
-Leaderboard messages show cached Discord display names for readability. User
-supplied display names and champion/team names are escaped so leaderboard posts
-and page changes cannot ping members or inject Discord markdown.
+Leaderboard embeds show cached Discord display names for readability instead of
+Discord mentions. User supplied display names and champion/team names are
+escaped so leaderboard posts and page changes cannot ping members or inject
+Discord markdown.
 
 ## Bot Operators
 
@@ -293,7 +294,7 @@ Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `fifa_public_calendar`. 
 
 The bot starts a 30-minute background sync loop after startup. Scheduled sync does not fetch the provider endpoint before `2026-06-11T00:00:00Z`, the first matchday midnight in UTC. `/operator sync` is an explicit manual override and attempts a provider fetch even before that date.
 
-Once active, scheduled sync fetches once per provider/config feed, applies inserted or changed results to all configured guilds, writes `match_results` and `result_sync_runs`, caches provider response payloads for debugging, logs delayed-provider warnings once, and recalculates scores for submitted predictions. Unchanged provider rows are left alone and do not increase the sync run's applied match count.
+Once active, scheduled sync fetches once per provider/config feed, applies inserted or changed results to all configured guilds, writes `match_results` and `result_sync_runs`, caches raw provider response payloads for debugging, stores normalized per-match provider metadata with results, logs delayed-provider warnings once, and recalculates scores for submitted predictions. Unchanged provider rows are left alone and do not increase the sync run's applied match count.
 
 Official group standings use the 2026 FIFA tie-breaker order: head-to-head points, head-to-head goal difference, head-to-head goals scored, overall goal difference, overall goals scored, team conduct score, then the most recent FIFA/Coca-Cola Men's World Ranking. Best third-place ranking uses points, goal difference, goals scored, team conduct score, then FIFA ranking. If stored results cannot resolve a required tie from deterministic match data, recalculation fails loudly until an operator records the official adjudication with `/operator resolve`.
 

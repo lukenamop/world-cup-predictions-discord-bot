@@ -26,7 +26,7 @@ from world_cup_bot.services.tournament_import import (
     TournamentImportError,
     load_tournament_config,
 )
-from world_cup_bot.ui.discord_formatting import discord_datetime, no_ping_mentions_kwargs
+from world_cup_bot.ui.discord_formatting import discord_datetime
 
 
 LOCK_MODE = "full_bracket_lock"
@@ -766,9 +766,9 @@ class AdminCog(commands.Cog):
         *,
         settings: GuildSettings | None,
         full_leaderboard: bool = False,
-    ) -> tuple[tuple[str, ...], tuple[discord.Embed, ...]]:
+    ) -> tuple[discord.Embed, ...]:
         if kind == "leaderboard":
-            from world_cup_bot.cogs.leaderboard import leaderboard_snapshot_messages
+            from world_cup_bot.cogs.leaderboard import leaderboard_snapshot_embeds
 
             scores = await LeaderboardService(self.bot.database.pool).top_scores(
                 guild_id=guild_id,
@@ -776,13 +776,13 @@ class AdminCog(commands.Cog):
             )
             if not scores:
                 raise ValueError("No submitted predictions are available yet.")
-            return leaderboard_snapshot_messages(scores, full=full_leaderboard), ()
+            return leaderboard_snapshot_embeds(scores, full=full_leaderboard)
 
         tournament = await TournamentConfigRepository(
             self.bot.database.pool
         ).get_active_config(guild_id)
         if kind == "info":
-            return (), _info_embeds(settings=settings, tournament=tournament)
+            return _info_embeds(settings=settings, tournament=tournament)
         raise ValueError("Post command must be `info` or `leaderboard`.")
 
     async def _post_announcement(
@@ -814,7 +814,7 @@ class AdminCog(commands.Cog):
             return
 
         try:
-            messages, embeds = await self._announcement_payload(
+            embeds = await self._announcement_payload(
                 guild_id,
                 kind,
                 settings=settings,
@@ -824,11 +824,8 @@ class AdminCog(commands.Cog):
             await ctx.respond(str(exc), ephemeral=True)
             return
 
-        mention_kwargs = no_ping_mentions_kwargs() if messages else {}
-        for message in messages:
-            await destination.send(message, **mention_kwargs)
-        if embeds:
-            await destination.send(embeds=list(embeds))
+        for start in range(0, len(embeds), 10):
+            await destination.send(embeds=list(embeds[start : start + 10]))
         await AuditLogRepository(self.bot.database.pool).insert(
             guild_id=guild_id,
             actor_user_id=str(ctx.author.id),

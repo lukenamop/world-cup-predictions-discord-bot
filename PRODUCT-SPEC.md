@@ -222,8 +222,8 @@ Operator commands are registered only in `OPERATOR_GUILD_ID`. Invocation require
 - Use ephemeral messages for personal prediction entry and noisy admin workflows.
 - Use select menus for group ordering and winner choices.
 - Use buttons for previous, next, finish, confirm submission, and cancel.
-- Use embeds for rules, summaries, and concise image fallbacks; use regular
-  messages for leaderboards so cached display names render compactly on mobile.
+- Use embeds for rules, summaries, leaderboards, and concise image fallbacks.
+  Leaderboards should use cached display names instead of Discord mentions.
 - Use pagination for large leaderboards.
 - Validate every step before moving users forward.
 - Never submit an incomplete or structurally impossible bracket.
@@ -284,7 +284,7 @@ Visual design:
 
 ### 5. Leaderboards And Polish
 
-- Add leaderboard messages and pagination.
+- Add leaderboard embeds and pagination.
 - Add user bracket/group views.
 - Add generated image views with result highlighting.
 - Add admin announcement, export, and backup workflows.
@@ -319,8 +319,9 @@ Visual design:
 - Make scheduled sync use the operator-configured provider and active canonical
   tournament config for all configured guilds.
 - Scope latest sync status to the active tournament config.
-- Persist last successful sync state and enough cached provider response metadata
-  to debug sync gaps without logging secrets.
+- Persist last successful sync state, raw provider response cache records, and
+  normalized per-result provider metadata needed to debug sync gaps without
+  logging secrets.
 - Detect provider result delays beyond the allowed window and log a single warning
   per delayed match or sync window.
 - Keep result ingestion, recalculation, and manual sync workflows idempotent under

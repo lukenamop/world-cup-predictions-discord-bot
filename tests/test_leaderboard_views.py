@@ -5,11 +5,10 @@ from datetime import datetime, timezone
 import unittest
 
 from world_cup_bot.cogs.leaderboard import (
-    MESSAGE_CONTENT_LIMIT,
     _points_embed,
     _rank_embed,
-    leaderboard_message,
-    leaderboard_snapshot_messages,
+    leaderboard_embed,
+    leaderboard_snapshot_embeds,
 )
 from world_cup_bot.data.repositories import PredictionScore
 from world_cup_bot.services.leaderboard_service import RankedScore
@@ -69,12 +68,18 @@ class LeaderboardViewTests(unittest.TestCase):
             for index in range(1, 27)
         ]
 
-        message = leaderboard_message(ranked_scores, page=1)
+        embed = leaderboard_embed(ranked_scores, page=1)
 
-        self.assertTrue(message.startswith("**Leaderboard**\n\nPage 1/2"))
-        self.assertIn("#25 User 25", message)
-        self.assertNotIn("User 26", message)
-        self.assertNotIn("<@", message)
+        self.assertEqual(embed.title, "Leaderboard")
+        self.assertTrue(embed.description.startswith("Page 1/2"))
+        self.assertEqual(len(embed.fields), 25)
+        self.assertEqual(embed.fields[-1].name, "#25 User 25")
+        self.assertEqual(
+            embed.fields[-1].value,
+            "75 pts · Groups: 33 · Knockout: 50 · Champion: Team 25",
+        )
+        self.assertNotIn("User 26", [field.name for field in embed.fields])
+        self.assertNotIn("<@", "\n".join(field.name for field in embed.fields))
 
     def test_leaderboard_page_two_uses_overall_rank_numbers(self) -> None:
         ranked_scores = [
@@ -91,13 +96,13 @@ class LeaderboardViewTests(unittest.TestCase):
             for index in range(1, 27)
         ]
 
-        message = leaderboard_message(ranked_scores, page=2)
+        embed = leaderboard_embed(ranked_scores, page=2)
 
-        self.assertIn("#26 User 26", message)
-        self.assertNotIn("#1 User 26", message)
-        self.assertNotIn("<@", message)
+        self.assertEqual(embed.fields[0].name, "#26 User 26")
+        self.assertNotIn("#1 User 26", [field.name for field in embed.fields])
+        self.assertNotIn("<@", "\n".join(field.name for field in embed.fields))
 
-    def test_full_leaderboard_snapshot_chunks_long_messages(self) -> None:
+    def test_full_leaderboard_snapshot_chunks_embeds(self) -> None:
         ranked_scores = [
             RankedScore(
                 rank=index,
@@ -112,14 +117,17 @@ class LeaderboardViewTests(unittest.TestCase):
             for index in range(1, 80)
         ]
 
-        messages = leaderboard_snapshot_messages(ranked_scores, full=True)
+        embeds = leaderboard_snapshot_embeds(ranked_scores, full=True)
 
-        self.assertGreater(len(messages), 1)
-        self.assertTrue(all(len(message) <= MESSAGE_CONTENT_LIMIT for message in messages))
-        self.assertIn("Full standings (79)", messages[0])
-        self.assertIn("#79 User 79", messages[-1])
-        self.assertNotIn("<@", "\n".join(messages))
-        self.assertNotIn("Use `/leaderboard`", "\n".join(messages))
+        self.assertEqual(len(embeds), 4)
+        self.assertTrue(all(len(embed.fields) <= 25 for embed in embeds))
+        self.assertIn("Full standings (79) · Part 1/4", embeds[0].description)
+        self.assertEqual(embeds[-1].fields[-1].name, "#79 User 79")
+        all_field_names = "\n".join(
+            field.name for embed in embeds for field in embed.fields
+        )
+        self.assertNotIn("<@", all_field_names)
+        self.assertTrue(all(getattr(embed.footer, "text", None) is None for embed in embeds))
 
 
 def _ranked_score() -> RankedScore:
