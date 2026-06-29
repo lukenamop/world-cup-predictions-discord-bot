@@ -12,7 +12,7 @@ from world_cup_bot.data.repositories import (
     PredictionScore,
     StoredMatchResult,
 )
-from world_cup_bot.cogs.leaderboard import leaderboard_embed
+from world_cup_bot.cogs.leaderboard import leaderboard_message
 from world_cup_bot.domain.predictions import (
     ROUND_ORDER,
     TournamentModel,
@@ -447,9 +447,9 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         row = leaderboard_row_text(ranked)
 
-        self.assertEqual(row, "1. <@user-1> `⭐ 10` - `🏆 Team A1`")
+        self.assertEqual(row, "#1 <@user-1> `⭐ 10` - `🏆 Team A1`")
 
-    def test_leaderboard_snapshot_uses_footer_instead_of_pagination(self) -> None:
+    def test_leaderboard_snapshot_uses_browse_prompt_instead_of_pagination(self) -> None:
         ranked_scores = [
             RankedScore(
                 rank=index,
@@ -463,17 +463,13 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
             for index in range(1, 28)
         ]
 
-        embed = leaderboard_embed(ranked_scores, snapshot=True)
+        message = leaderboard_message(ranked_scores, snapshot=True)
 
-        self.assertTrue(embed.description.startswith("Top 25"))
-        self.assertNotIn("Page", embed.description)
-        self.assertEqual(
-            embed.footer.text,
-            "Use `/leaderboard` to browse the full standings.",
-        )
-        self.assertEqual(embed.fields, [])
-        self.assertIn("<@user-25>", embed.description)
-        self.assertNotIn("<@user-26>", embed.description)
+        self.assertTrue(message.startswith("**Leaderboard**\n\nTop 25"))
+        self.assertNotIn("Page", message)
+        self.assertIn("Use `/leaderboard` to browse the full standings.", message)
+        self.assertIn("<@user-25>", message)
+        self.assertNotIn("<@user-26>", message)
 
     async def test_snapshot_allows_other_members_to_view_prediction_images(self) -> None:
         service = _view_service()

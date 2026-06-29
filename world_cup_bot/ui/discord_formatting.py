@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import discord
+
 
 DISCORD_TIMESTAMP_STYLES = frozenset({"t", "T", "d", "D", "f", "F", "R"})
 
@@ -14,6 +16,10 @@ def discord_timestamp(value: datetime, style: str = "f") -> str:
 
 def discord_datetime(value: datetime) -> str:
     return f"{discord_timestamp(value, 'F')} ({discord_timestamp(value, 'R')})"
+
+
+def no_ping_mentions_kwargs() -> dict[str, discord.AllowedMentions]:
+    return {"allowed_mentions": discord.AllowedMentions.none()}
 
 
 def _unix_timestamp(value: datetime) -> int:

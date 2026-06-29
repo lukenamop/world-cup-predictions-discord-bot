@@ -106,25 +106,24 @@ class CommandOptionMetadataTests(unittest.TestCase):
                 "leaderboard_command ctx.respond calls should be ephemeral.",
             )
 
-    def test_admin_post_leaderboard_uses_snapshot_embed(self) -> None:
+    def test_admin_post_leaderboard_uses_snapshot_message(self) -> None:
         tree = ast.parse(
             (PROJECT_ROOT / "world_cup_bot" / "cogs" / "admin.py").read_text()
         )
-        announcement_embeds = _async_function_by_name(tree, "_announcement_embeds")
-        leaderboard_embed_calls = [
+        command = _function_by_name(tree, "post_leaderboard_command")
+        defaults = _argument_defaults(command)
+        self.assertFalse(defaults["full"].value)
+
+        announcement_payload = _async_function_by_name(tree, "_announcement_payload")
+        leaderboard_message_calls = [
             node
-            for node in ast.walk(announcement_embeds)
+            for node in ast.walk(announcement_payload)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "leaderboard_embed"
+            and node.func.id == "leaderboard_snapshot_messages"
         ]
 
-        self.assertGreater(len(leaderboard_embed_calls), 0)
-        for call in leaderboard_embed_calls:
-            self.assertTrue(
-                _has_true_keyword(call, "snapshot"),
-                "admin leaderboard posts should use non-paginated snapshot embeds.",
-            )
+        self.assertGreater(len(leaderboard_message_calls), 0)
 
     def test_help_command_uses_support_contact_instead_of_command_dump(self) -> None:
         source = (PROJECT_ROOT / "world_cup_bot" / "cogs" / "foundation.py").read_text()

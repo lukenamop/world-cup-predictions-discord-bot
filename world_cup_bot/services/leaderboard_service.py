@@ -149,7 +149,7 @@ class LeaderboardService:
         self,
         *,
         guild_id: str,
-        limit: int = 10,
+        limit: int | None = 10,
     ) -> list[RankedScore]:
         tournament = await self.tournaments.get_active_config(guild_id)
         if tournament is None:
@@ -159,7 +159,7 @@ class LeaderboardService:
             tournament_config_id=tournament.id,
             model=TournamentModel.from_config(tournament.config),
         )
-        return scores[:limit]
+        return scores if limit is None else scores[:limit]
 
     async def _ranked_scores(
         self,
@@ -289,7 +289,7 @@ def _champion_names_by_entry_id(
 def leaderboard_row_text(ranked: RankedScore) -> str:
     score = ranked.score
     champion = ranked.champion_team_name or "Unavailable"
-    return f"{ranked.rank}. <@{score.user_id}> `⭐ {score.total_points}` - `🏆 {champion}`"
+    return f"#{ranked.rank} <@{score.user_id}> `⭐ {score.total_points}` - `🏆 {champion}`"
 
 
 def _to_domain_result(result: StoredMatchResult) -> MatchResult:

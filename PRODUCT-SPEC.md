@@ -200,7 +200,7 @@ Admin commands:
 - `/admin lock`: sets, views, or forces prediction locks.
 - `/admin recalc`: recalculates scores and leaderboard totals.
 - `/admin post info`: posts rules, lock deadline, reminder copy, and prediction commands to the configured announcement channel.
-- `/admin post leaderboard`: posts leaderboard snapshots to the configured leaderboard channel.
+- `/admin post leaderboard [full]`: posts a top-10 leaderboard snapshot to the configured leaderboard channel by default, or the full leaderboard when `full:true`.
 - `/admin export`: exports tournament, prediction, scoring, or leaderboard data.
 - `/admin backup`: creates an operator-friendly backup of bot configuration and database state.
 
@@ -222,7 +222,8 @@ Operator commands are registered only in `OPERATOR_GUILD_ID`. Invocation require
 - Use ephemeral messages for personal prediction entry and noisy admin workflows.
 - Use select menus for group ordering and winner choices.
 - Use buttons for previous, next, finish, confirm submission, and cancel.
-- Use embeds for rules, summaries, leaderboards, and concise image fallbacks.
+- Use embeds for rules, summaries, and concise image fallbacks; use regular
+  messages for leaderboards so Discord user mentions render correctly on mobile.
 - Use pagination for large leaderboards.
 - Validate every step before moving users forward.
 - Never submit an incomplete or structurally impossible bracket.
@@ -283,7 +284,7 @@ Visual design:
 
 ### 5. Leaderboards And Polish
 
-- Add leaderboard embeds and pagination.
+- Add leaderboard messages and pagination.
 - Add user bracket/group views.
 - Add generated image views with result highlighting.
 - Add admin announcement, export, and backup workflows.
@@ -308,6 +309,8 @@ Visual design:
   deadline, and configured channels after setup.
 - Make `/admin post info` and `/admin post leaderboard` use configured
   channels by default while still allowing an explicit channel override.
+  `/admin post leaderboard` defaults to a top-10 snapshot and supports
+  `full:true` for a full leaderboard snapshot.
 - Audit every admin change that mutates setup, scoring, lock,
   channel, tournament, result, export, or backup state.
 

@@ -68,7 +68,7 @@ Use `/admin lock deadline_utc:...` when you only need to set or update the full-
 - `/admin lock [deadline_utc] [clear]` sets or clears the full-bracket lock deadline.
 - `/admin recalc` recalculates submitted prediction scores from stored results.
 - `/admin post info [channel]` posts league info and rules to the configured announcement channel by default, or to an explicit override channel.
-- `/admin post leaderboard [channel]` posts a leaderboard snapshot to the configured leaderboard channel by default, or to an explicit override channel.
+- `/admin post leaderboard [channel] [full]` posts a top-10 leaderboard snapshot to the configured leaderboard channel by default, or to an explicit override channel. Use `full:true` to post the full leaderboard.
 - `/admin export` returns a JSON export of submitted predictions and current scores.
 - `/admin backup` returns an operator-friendly JSON backup of league settings, active tournament config, predictions, scores, stored results, and recent sync runs.
 
@@ -77,6 +77,7 @@ Examples:
 ```text
 /admin post info channel:#predictions
 /admin post leaderboard
+/admin post leaderboard full:true
 /admin export
 /admin backup
 ```
@@ -120,6 +121,9 @@ All predictions use a full-bracket lock. Group picks, third-place qualifier pick
 Champion, runner-up, third-place picks, and available point totals are visible through `/prediction [user]`. The generated `/groups [user]` and `/bracket [user]` images include concise embed summaries, use checked-in flag assets, and show point/missed badges alongside colors so correctness does not rely on color alone.
 
 Leaderboard ties use shared rank. Users with the same point total receive the same rank, and the next rank skips ahead by the number of tied users.
+
+Leaderboard messages show Discord user mentions for readability, but they disable
+allowed mentions so leaderboard posts and page changes do not ping members.
 
 ## Bot Operators
 
@@ -367,7 +371,7 @@ Run this manual flow in the staging guild and record any unexpected response:
 11. Run `/leaderboard`, `/rank`, and `/points`; before official results, confirm submitted predictors appear with zero or pending point details.
 12. Run `/operator sync` in the configured operator guild and verify it completes or reports provider availability clearly.
 13. Run `/admin recalc` and confirm it is idempotent when repeated.
-14. Run `/admin post leaderboard` and confirm it posts to the leaderboard channel.
+14. Run `/admin post leaderboard` and confirm it posts the top-10 snapshot to the leaderboard channel. Run `/admin post leaderboard full:true` and confirm it posts the full snapshot.
 15. Run `/admin export` and `/admin backup`; confirm each returns an ephemeral JSON attachment and writes an audit row.
 16. Run `/admin lock deadline_utc:2026-05-01T00:00:00Z`; confirm `/predict` or `/edit` is blocked by lock behavior.
 17. Run `/admin close`; confirm prediction entry is closed without changing the configured lock deadline.

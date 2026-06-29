@@ -4,7 +4,13 @@ from dataclasses import replace
 from datetime import datetime, timezone
 import unittest
 
-from world_cup_bot.cogs.leaderboard import _points_embed, _rank_embed, leaderboard_embed
+from world_cup_bot.cogs.leaderboard import (
+    MESSAGE_CONTENT_LIMIT,
+    _points_embed,
+    _rank_embed,
+    leaderboard_message,
+    leaderboard_snapshot_messages,
+)
 from world_cup_bot.data.repositories import PredictionScore
 from world_cup_bot.services.leaderboard_service import RankedScore
 
@@ -50,12 +56,53 @@ class LeaderboardViewTests(unittest.TestCase):
             for index in range(1, 27)
         ]
 
-        embed = leaderboard_embed(ranked_scores, page=1)
+        message = leaderboard_message(ranked_scores, page=1)
 
-        self.assertTrue(embed.description.startswith("Page 1/2"))
-        self.assertEqual(embed.fields, [])
-        self.assertIn("<@user-25>", embed.description)
-        self.assertNotIn("<@user-26>", embed.description)
+        self.assertTrue(message.startswith("**Leaderboard**\n\nPage 1/2"))
+        self.assertIn("<@user-25>", message)
+        self.assertNotIn("<@user-26>", message)
+
+    def test_leaderboard_page_two_uses_overall_rank_numbers(self) -> None:
+        ranked_scores = [
+            RankedScore(
+                rank=index,
+                score=replace(
+                    _ranked_score().score,
+                    user_id=f"user-{index}",
+                    total_points=100 - index,
+                ),
+                champion_team_name=f"Team {index}",
+            )
+            for index in range(1, 27)
+        ]
+
+        message = leaderboard_message(ranked_scores, page=2)
+
+        self.assertIn("#26 <@user-26>", message)
+        self.assertNotIn("#1 <@user-26>", message)
+
+    def test_full_leaderboard_snapshot_chunks_long_messages(self) -> None:
+        ranked_scores = [
+            RankedScore(
+                rank=index,
+                score=replace(
+                    _ranked_score().score,
+                    user_id=f"user-{index}",
+                    display_name=f"User {index}",
+                    total_points=200 - index,
+                ),
+                champion_team_name=f"Exceptionally Long Team Name {index}",
+            )
+            for index in range(1, 80)
+        ]
+
+        messages = leaderboard_snapshot_messages(ranked_scores, full=True)
+
+        self.assertGreater(len(messages), 1)
+        self.assertTrue(all(len(message) <= MESSAGE_CONTENT_LIMIT for message in messages))
+        self.assertIn("Full standings (79)", messages[0])
+        self.assertIn("#79 <@user-79>", messages[-1])
+        self.assertNotIn("Use `/leaderboard`", "\n".join(messages))
 
 
 def _ranked_score() -> RankedScore:

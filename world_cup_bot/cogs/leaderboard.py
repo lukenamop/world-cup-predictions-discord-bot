@@ -10,10 +10,15 @@ from world_cup_bot.services.leaderboard_service import (
     RankedScore,
     leaderboard_row_text,
 )
-from world_cup_bot.ui.discord_formatting import discord_datetime, discord_timestamp
+from world_cup_bot.ui.discord_formatting import (
+    discord_datetime,
+    discord_timestamp,
+    no_ping_mentions_kwargs,
+)
 
 PAGE_SIZE = 25
-EMBED_DESCRIPTION_LIMIT = 4096
+MESSAGE_CONTENT_LIMIT = 2000
+SNAPSHOT_FOOTER = "Use `/leaderboard` to browse the full standings."
 
 
 class LeaderboardCog(commands.Cog):
@@ -61,7 +66,12 @@ class LeaderboardCog(commands.Cog):
             page=max(1, page),
             requester_user_id=str(ctx.author.id),
         )
-        await ctx.respond(embed=view.embed(), view=view, ephemeral=True)
+        await ctx.respond(
+            view.content(),
+            view=view,
+            ephemeral=True,
+            **no_ping_mentions_kwargs(),
+        )
 
     @discord.slash_command(name="rank", description="Show a user's current rank.")
     @discord.option(
@@ -160,8 +170,8 @@ class LeaderboardPageView(discord.ui.View):
     def page_count(self) -> int:
         return max(1, (len(self.ranked_scores) + PAGE_SIZE - 1) // PAGE_SIZE)
 
-    def embed(self) -> discord.Embed:
-        return leaderboard_embed(self.ranked_scores, page=self.page)
+    def content(self) -> str:
+        return leaderboard_message(self.ranked_scores, page=self.page)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if str(interaction.user.id) == self.requester_user_id:
@@ -193,46 +203,122 @@ class LeaderboardPageView(discord.ui.View):
     async def _previous(self, interaction: discord.Interaction) -> None:
         self.page = max(1, self.page - 1)
         self._refresh_items()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
+        await interaction.response.edit_message(
+            content=self.content(),
+            view=self,
+            **no_ping_mentions_kwargs(),
+        )
 
     async def _next(self, interaction: discord.Interaction) -> None:
         self.page = min(self.page_count, self.page + 1)
         self._refresh_items()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
+        await interaction.response.edit_message(
+            content=self.content(),
+            view=self,
+            **no_ping_mentions_kwargs(),
+        )
 
 
-def leaderboard_embed(
+def leaderboard_message(
     ranked_scores: list[RankedScore],
     *,
     page: int = 1,
     snapshot: bool = False,
-) -> discord.Embed:
+) -> str:
     page_count = max(1, (len(ranked_scores) + PAGE_SIZE - 1) // PAGE_SIZE)
     safe_page = 1 if snapshot else min(max(1, page), page_count)
     start = (safe_page - 1) * PAGE_SIZE
     rows = ranked_scores[start : start + PAGE_SIZE]
-    latest = max((ranked.score.recalculated_at for ranked in ranked_scores), default=None)
-    meta = f"Top {len(rows)}" if snapshot else f"Page {safe_page}/{page_count}"
-    if latest is not None:
-        meta = f"{meta}\nLast updated {discord_timestamp(latest, 'R')}"
+    label = f"Top {len(rows)}" if snapshot else f"Page {safe_page}/{page_count}"
     lines = [leaderboard_row_text(ranked) for ranked in rows]
-    description = _leaderboard_description(meta, lines)
-    embed = discord.Embed(
-        title="Leaderboard",
-        description=description,
-        color=discord.Color.gold(),
+    footer = SNAPSHOT_FOOTER if snapshot else None
+    return _leaderboard_content(
+        _leaderboard_meta(ranked_scores, label),
+        lines,
+        footer=footer,
     )
-    if snapshot:
-        embed.set_footer(text="Use `/leaderboard` to browse the full standings.")
-    return embed
 
 
-def _leaderboard_description(meta: str, lines: list[str]) -> str:
+def leaderboard_snapshot_messages(
+    ranked_scores: list[RankedScore],
+    *,
+    full: bool = False,
+) -> tuple[str, ...]:
+    label = f"Full standings ({len(ranked_scores)})" if full else f"Top {len(ranked_scores)}"
+    lines = [leaderboard_row_text(ranked) for ranked in ranked_scores]
+    return _leaderboard_content_chunks(
+        _leaderboard_meta(ranked_scores, label),
+        lines,
+        footer=None if full else SNAPSHOT_FOOTER,
+    )
+
+
+def _leaderboard_meta(ranked_scores: list[RankedScore], label: str) -> str:
+    latest = max((ranked.score.recalculated_at for ranked in ranked_scores), default=None)
+    if latest is None:
+        return label
+    return f"{label}\nLast updated {discord_timestamp(latest, 'R')}"
+
+
+def _leaderboard_content(
+    meta: str,
+    lines: list[str],
+    *,
+    footer: str | None = None,
+) -> str:
+    return _fit_message_content(_leaderboard_content_body(meta, lines, footer=footer))
+
+
+def _fit_message_content(content: str) -> str:
+    if len(content) <= MESSAGE_CONTENT_LIMIT:
+        return content
+    return content[: MESSAGE_CONTENT_LIMIT - 3].rstrip() + "..."
+
+
+def _leaderboard_content_body(
+    meta: str,
+    lines: list[str],
+    *,
+    footer: str | None = None,
+) -> str:
     rankings = "\n".join(lines)
-    description = f"{meta}\n\n{rankings}" if rankings else meta
-    if len(description) <= EMBED_DESCRIPTION_LIMIT:
-        return description
-    return description[: EMBED_DESCRIPTION_LIMIT - 3].rstrip() + "..."
+    parts = ["**Leaderboard**", meta]
+    if rankings:
+        parts.append(rankings)
+    if footer:
+        parts.append(footer)
+    return "\n\n".join(parts)
+
+
+def _leaderboard_content_chunks(
+    meta: str,
+    lines: list[str],
+    *,
+    footer: str | None = None,
+) -> tuple[str, ...]:
+    chunks: list[str] = []
+    current_lines: list[str] = []
+    current_content = _leaderboard_content_body(meta, current_lines, footer=footer)
+    for line in lines:
+        candidate_lines = [*current_lines, line]
+        candidate_content = _leaderboard_content_body(
+            meta,
+            candidate_lines,
+            footer=footer,
+        )
+        if current_lines and len(candidate_content) > MESSAGE_CONTENT_LIMIT:
+            chunks.append(_fit_message_content(current_content))
+            current_lines = [line]
+            current_content = _leaderboard_content_body(
+                meta,
+                current_lines,
+                footer=footer,
+            )
+        else:
+            current_lines = candidate_lines
+            current_content = candidate_content
+    chunks.append(_fit_message_content(current_content))
+    return tuple(chunks)
 
 
 def _rank_embed(ranked: RankedScore) -> discord.Embed:

@@ -50,6 +50,27 @@ class LeaderboardServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([ranked.score.total_points for ranked in ranked_scores], [0, 0])
         self.assertTrue(all(ranked.champion_team_name for ranked in ranked_scores))
 
+    async def test_top_scores_limit_none_returns_all_ranked_scores(self) -> None:
+        config = _canonical_tournament_config()
+        model = TournamentModel.from_config(config)
+        entries = [
+            _prediction_entry(
+                entry_id=index,
+                user_id=f"user-{index}",
+                display_name=f"User {index}",
+                data=build_random_prediction_data(model, randomizer=random.Random(index)),
+            )
+            for index in range(1, 4)
+        ]
+        service = _leaderboard_service(config=config, entries=entries, scores=[])
+
+        ranked_scores = await service.top_scores(guild_id="guild-1", limit=None)
+
+        self.assertEqual(
+            [ranked.score.user_id for ranked in ranked_scores],
+            ["user-1", "user-2", "user-3"],
+        )
+
     async def test_top_scores_ranks_unscored_submissions_below_scored_entries(self) -> None:
         config = _canonical_tournament_config()
         model = TournamentModel.from_config(config)

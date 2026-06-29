@@ -26,7 +26,7 @@ from world_cup_bot.services.tournament_import import (
     TournamentImportError,
     load_tournament_config,
 )
-from world_cup_bot.ui.discord_formatting import discord_datetime
+from world_cup_bot.ui.discord_formatting import discord_datetime, no_ping_mentions_kwargs
 
 
 LOCK_MODE = "full_bracket_lock"
@@ -673,6 +673,12 @@ class AdminCog(commands.Cog):
 
     @post.command(name="leaderboard", description="Post the current leaderboard.")
     @discord.option(
+        "full",
+        bool,
+        description="Post the full leaderboard instead of the default top 10.",
+        required=False,
+    )
+    @discord.option(
         "channel",
         discord.TextChannel,
         description="Text channel to post to instead of the configured default.",
@@ -686,8 +692,18 @@ class AdminCog(commands.Cog):
             "Text channel to post to instead of the configured default.",
             required=False,
         ) = None,
+        full: discord.Option(
+            bool,
+            "Post the full leaderboard instead of the default top 10.",
+            required=False,
+        ) = False,
     ) -> None:
-        await self._post_announcement(ctx, kind="leaderboard", channel=channel)
+        await self._post_announcement(
+            ctx,
+            kind="leaderboard",
+            channel=channel,
+            full_leaderboard=bool(full),
+        )
 
     @admin.command(name="export", description="Export submitted predictions as JSON.")
     async def export_command(self, ctx: discord.ApplicationContext) -> None:
@@ -743,28 +759,30 @@ class AdminCog(commands.Cog):
             ephemeral=True,
         )
 
-    async def _announcement_embeds(
+    async def _announcement_payload(
         self,
         guild_id: str,
         kind: str,
-    ) -> tuple[discord.Embed, ...]:
+        *,
+        settings: GuildSettings | None,
+        full_leaderboard: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[discord.Embed, ...]]:
         if kind == "leaderboard":
-            from world_cup_bot.cogs.leaderboard import leaderboard_embed
+            from world_cup_bot.cogs.leaderboard import leaderboard_snapshot_messages
 
             scores = await LeaderboardService(self.bot.database.pool).top_scores(
                 guild_id=guild_id,
-                limit=10,
+                limit=None if full_leaderboard else 10,
             )
             if not scores:
                 raise ValueError("No submitted predictions are available yet.")
-            return (leaderboard_embed(scores, snapshot=True),)
+            return leaderboard_snapshot_messages(scores, full=full_leaderboard), ()
 
-        settings = await GuildSettingsRepository(self.bot.database.pool).get(guild_id)
         tournament = await TournamentConfigRepository(
             self.bot.database.pool
         ).get_active_config(guild_id)
         if kind == "info":
-            return _info_embeds(settings=settings, tournament=tournament)
+            return (), _info_embeds(settings=settings, tournament=tournament)
         raise ValueError("Post command must be `info` or `leaderboard`.")
 
     async def _post_announcement(
@@ -773,6 +791,7 @@ class AdminCog(commands.Cog):
         *,
         kind: str,
         channel: discord.TextChannel | None,
+        full_leaderboard: bool = False,
     ) -> None:
         if not await self._ensure_admin(ctx):
             return
@@ -795,12 +814,21 @@ class AdminCog(commands.Cog):
             return
 
         try:
-            embeds = await self._announcement_embeds(guild_id, kind)
+            messages, embeds = await self._announcement_payload(
+                guild_id,
+                kind,
+                settings=settings,
+                full_leaderboard=full_leaderboard,
+            )
         except (LeaderboardServiceError, ValueError) as exc:
             await ctx.respond(str(exc), ephemeral=True)
             return
 
-        await destination.send(embeds=list(embeds))
+        mention_kwargs = no_ping_mentions_kwargs() if messages else {}
+        for message in messages:
+            await destination.send(message, **mention_kwargs)
+        if embeds:
+            await destination.send(embeds=list(embeds))
         await AuditLogRepository(self.bot.database.pool).insert(
             guild_id=guild_id,
             actor_user_id=str(ctx.author.id),
@@ -808,6 +836,7 @@ class AdminCog(commands.Cog):
             details={
                 "kind": kind,
                 "channel_id": str(getattr(destination, "id", "")),
+                "full": bool(full_leaderboard) if kind == "leaderboard" else False,
             },
         )
         await ctx.respond(f"Posted `{kind}` to {destination.mention}.", ephemeral=True)
