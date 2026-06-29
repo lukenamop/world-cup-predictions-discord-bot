@@ -223,7 +223,7 @@ Operator commands are registered only in `OPERATOR_GUILD_ID`. Invocation require
 - Use select menus for group ordering and winner choices.
 - Use buttons for previous, next, finish, confirm submission, and cancel.
 - Use embeds for rules, summaries, and concise image fallbacks; use regular
-  messages for leaderboards so Discord user mentions render correctly on mobile.
+  messages for leaderboards so cached display names render compactly on mobile.
 - Use pagination for large leaderboards.
 - Validate every step before moving users forward.
 - Never submit an incomplete or structurally impossible bracket.

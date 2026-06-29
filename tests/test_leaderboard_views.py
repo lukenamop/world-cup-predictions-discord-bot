@@ -22,6 +22,18 @@ class LeaderboardViewTests(unittest.TestCase):
         self.assertEqual(embed.title, "Rank #1: User One")
         self.assertIsNone(embed.description)
 
+    def test_rank_embed_escapes_user_supplied_display_name(self) -> None:
+        base = _ranked_score()
+        ranked = replace(
+            base,
+            score=replace(base.score, display_name="@everyone **Winner**"),
+        )
+
+        embed = _rank_embed(ranked)
+
+        self.assertNotIn("@everyone", embed.title)
+        self.assertIn(r"\*\*Winner\*\*", embed.title)
+
     def test_points_embed_hides_internal_version_and_duplicate_knockout_total(self) -> None:
         embed = _points_embed(_ranked_score())
 
@@ -49,6 +61,7 @@ class LeaderboardViewTests(unittest.TestCase):
                 score=replace(
                     _ranked_score().score,
                     user_id=f"user-{index}",
+                    display_name=f"User {index}",
                     total_points=100 - index,
                 ),
                 champion_team_name=f"Team {index}",
@@ -59,8 +72,9 @@ class LeaderboardViewTests(unittest.TestCase):
         message = leaderboard_message(ranked_scores, page=1)
 
         self.assertTrue(message.startswith("**Leaderboard**\n\nPage 1/2"))
-        self.assertIn("<@user-25>", message)
-        self.assertNotIn("<@user-26>", message)
+        self.assertIn("#25 User 25", message)
+        self.assertNotIn("User 26", message)
+        self.assertNotIn("<@", message)
 
     def test_leaderboard_page_two_uses_overall_rank_numbers(self) -> None:
         ranked_scores = [
@@ -69,6 +83,7 @@ class LeaderboardViewTests(unittest.TestCase):
                 score=replace(
                     _ranked_score().score,
                     user_id=f"user-{index}",
+                    display_name=f"User {index}",
                     total_points=100 - index,
                 ),
                 champion_team_name=f"Team {index}",
@@ -78,8 +93,9 @@ class LeaderboardViewTests(unittest.TestCase):
 
         message = leaderboard_message(ranked_scores, page=2)
 
-        self.assertIn("#26 <@user-26>", message)
-        self.assertNotIn("#1 <@user-26>", message)
+        self.assertIn("#26 User 26", message)
+        self.assertNotIn("#1 User 26", message)
+        self.assertNotIn("<@", message)
 
     def test_full_leaderboard_snapshot_chunks_long_messages(self) -> None:
         ranked_scores = [
@@ -101,7 +117,8 @@ class LeaderboardViewTests(unittest.TestCase):
         self.assertGreater(len(messages), 1)
         self.assertTrue(all(len(message) <= MESSAGE_CONTENT_LIMIT for message in messages))
         self.assertIn("Full standings (79)", messages[0])
-        self.assertIn("#79 <@user-79>", messages[-1])
+        self.assertIn("#79 User 79", messages[-1])
+        self.assertNotIn("<@", "\n".join(messages))
         self.assertNotIn("Use `/leaderboard`", "\n".join(messages))
 
 

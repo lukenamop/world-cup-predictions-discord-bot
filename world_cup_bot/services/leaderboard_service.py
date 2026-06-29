@@ -286,12 +286,6 @@ def _champion_names_by_entry_id(
     return champion_names
 
 
-def leaderboard_row_text(ranked: RankedScore) -> str:
-    score = ranked.score
-    champion = ranked.champion_team_name or "Unavailable"
-    return f"#{ranked.rank} <@{score.user_id}> `⭐ {score.total_points}` - `🏆 {champion}`"
-
-
 def _to_domain_result(result: StoredMatchResult) -> MatchResult:
     return MatchResult(
         match_id=result.match_id,

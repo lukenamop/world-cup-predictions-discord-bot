@@ -8,11 +8,11 @@ from world_cup_bot.services.leaderboard_service import (
     LeaderboardService,
     LeaderboardServiceError,
     RankedScore,
-    leaderboard_row_text,
 )
 from world_cup_bot.ui.discord_formatting import (
     discord_datetime,
     discord_timestamp,
+    escape_discord_text,
     no_ping_mentions_kwargs,
 )
 
@@ -321,10 +321,17 @@ def _leaderboard_content_chunks(
     return tuple(chunks)
 
 
+def leaderboard_row_text(ranked: RankedScore) -> str:
+    score = ranked.score
+    display_name = escape_discord_text(score.display_name)
+    champion = escape_discord_text(ranked.champion_team_name or "Unavailable")
+    return f"#{ranked.rank} {display_name} `⭐ {score.total_points}` - `🏆 {champion}`"
+
+
 def _rank_embed(ranked: RankedScore) -> discord.Embed:
     score = ranked.score
     embed = discord.Embed(
-        title=f"Rank #{ranked.rank}: {score.display_name}",
+        title=f"Rank #{ranked.rank}: {escape_discord_text(score.display_name)}",
         color=discord.Color.blurple(),
     )
     embed.add_field(name="Total", value=str(score.total_points), inline=True)
@@ -344,7 +351,7 @@ def _points_embed(ranked: RankedScore) -> discord.Embed:
     knockout = score.breakdown.get("knockout", {})
     placements = knockout.get("placements", {}) if isinstance(knockout, dict) else {}
     embed = _rank_embed(ranked)
-    embed.title = f"Point Breakdown: {score.display_name}"
+    embed.title = f"Point Breakdown: {escape_discord_text(score.display_name)}"
     embed.description = None
     embed.add_field(
         name="Third-place hits",

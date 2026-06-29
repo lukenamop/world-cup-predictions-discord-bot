@@ -1173,10 +1173,11 @@ class ResultRepository:
         tournament_config_id: int,
         results: Sequence[StoredMatchResult],
     ) -> int:
+        applied = 0
         async with self.pool.acquire() as connection:
             async with connection.transaction():
                 for result in results:
-                    await connection.execute(
+                    row_id = await connection.fetchval(
                         """
                         insert into match_results (
                             guild_id,
@@ -1219,6 +1220,36 @@ class ResultRepository:
                             provider_payload = excluded.provider_payload,
                             synced_at = now(),
                             updated_at = now()
+                        where (
+                            match_results.provider,
+                            match_results.provider_match_id,
+                            match_results.stage,
+                            match_results.round_name,
+                            match_results.group_id,
+                            match_results.home_team_id,
+                            match_results.away_team_id,
+                            match_results.home_score,
+                            match_results.away_score,
+                            match_results.status,
+                            match_results.winner_team_id,
+                            match_results.played_at,
+                            match_results.provider_payload
+                        ) is distinct from (
+                            excluded.provider,
+                            excluded.provider_match_id,
+                            excluded.stage,
+                            excluded.round_name,
+                            excluded.group_id,
+                            excluded.home_team_id,
+                            excluded.away_team_id,
+                            excluded.home_score,
+                            excluded.away_score,
+                            excluded.status,
+                            excluded.winner_team_id,
+                            excluded.played_at,
+                            excluded.provider_payload
+                        )
+                        returning id
                         """,
                         guild_id,
                         tournament_config_id,
@@ -1237,7 +1268,9 @@ class ResultRepository:
                         result.played_at,
                         json.dumps(result.provider_payload, sort_keys=True),
                     )
-        return len(results)
+                    if row_id is not None:
+                        applied += 1
+        return applied
 
     async def start_sync_run(
         self,

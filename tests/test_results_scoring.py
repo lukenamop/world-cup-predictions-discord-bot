@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import random
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from world_cup_bot.data.repositories import ResultRepository, StoredMatchResult
 from world_cup_bot.domain.predictions import (
     ROUND_ORDER,
     RoundMatch,
@@ -704,6 +706,26 @@ class ResultSyncServiceTests(unittest.IsolatedAsyncioTestCase):
             await service.sync_guild(guild_id="guild-1")
 
 
+class ResultRepositoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upsert_match_results_counts_only_inserted_or_changed_rows(self) -> None:
+        pool = _FakePool(fetchval_results=[101, None])
+        repository = ResultRepository(pool)
+
+        applied = await repository.upsert_match_results(
+            guild_id="guild-1",
+            tournament_config_id=7,
+            results=[
+                _stored_match_result("A-1"),
+                _stored_match_result("A-2"),
+            ],
+        )
+
+        self.assertEqual(applied, 1)
+        self.assertEqual(pool.connection.fetchval_call_count, 2)
+        self.assertIn("is distinct from", pool.connection.fetchval_sql.lower())
+        self.assertIn("returning id", pool.connection.fetchval_sql.lower())
+
+
 class _ActiveTournamentRepo:
     async def get_active_config(self, guild_id: str) -> object:
         return _ActiveTournament()
@@ -717,6 +739,48 @@ class _ActiveTournament:
 class _UnexpectedResultRepo:
     async def start_sync_run(self, **kwargs: object) -> int:
         raise AssertionError("unsupported providers should not start sync runs")
+
+
+class _FakePool:
+    def __init__(self, *, fetchval_results: list[int | None]) -> None:
+        self.connection = _FakeConnection(fetchval_results)
+
+    def acquire(self) -> "_FakeAcquire":
+        return _FakeAcquire(self.connection)
+
+
+class _FakeAcquire:
+    def __init__(self, connection: "_FakeConnection") -> None:
+        self.connection = connection
+
+    async def __aenter__(self) -> "_FakeConnection":
+        return self.connection
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+class _FakeConnection:
+    def __init__(self, fetchval_results: list[int | None]) -> None:
+        self.fetchval_results = fetchval_results
+        self.fetchval_call_count = 0
+        self.fetchval_sql = ""
+
+    def transaction(self) -> "_FakeTransaction":
+        return _FakeTransaction()
+
+    async def fetchval(self, sql: str, *args: object) -> int | None:
+        self.fetchval_call_count += 1
+        self.fetchval_sql = sql
+        return self.fetchval_results.pop(0)
+
+
+class _FakeTransaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
 
 
 class _FakeFifaResponse:
@@ -837,6 +901,25 @@ def _standing(
         goals_for=goals_for,
         goals_against=goals_for - goal_difference,
         points=points,
+    )
+
+
+def _stored_match_result(match_id: str) -> StoredMatchResult:
+    return StoredMatchResult(
+        match_id=match_id,
+        provider="fifa_public_calendar",
+        provider_match_id=f"provider-{match_id}",
+        stage="group",
+        round_name=None,
+        group_id="A",
+        home_team_id="A1",
+        away_team_id="A2",
+        home_score=1,
+        away_score=0,
+        status="FINISHED",
+        winner_team_id="A1",
+        played_at=datetime(2026, 6, 11, 20, 0, tzinfo=timezone.utc),
+        provider_payload={"id": match_id},
     )
 
 

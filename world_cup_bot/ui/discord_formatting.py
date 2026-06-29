@@ -18,6 +18,10 @@ def discord_datetime(value: datetime) -> str:
     return f"{discord_timestamp(value, 'F')} ({discord_timestamp(value, 'R')})"
 
 
+def escape_discord_text(value: str) -> str:
+    return discord.utils.escape_markdown(discord.utils.escape_mentions(value))
+
+
 def no_ping_mentions_kwargs() -> dict[str, discord.AllowedMentions]:
     return {"allowed_mentions": discord.AllowedMentions.none()}
 

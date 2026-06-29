@@ -12,7 +12,7 @@ from world_cup_bot.data.repositories import (
     PredictionScore,
     StoredMatchResult,
 )
-from world_cup_bot.cogs.leaderboard import leaderboard_message
+from world_cup_bot.cogs.leaderboard import leaderboard_message, leaderboard_row_text
 from world_cup_bot.domain.predictions import (
     ROUND_ORDER,
     TournamentModel,
@@ -22,7 +22,7 @@ from world_cup_bot.domain.predictions import (
     record_knockout_winner,
     record_third_place_qualifiers,
 )
-from world_cup_bot.services.leaderboard_service import RankedScore, leaderboard_row_text
+from world_cup_bot.services.leaderboard_service import RankedScore
 from world_cup_bot.services.prediction_view_service import (
     BracketRenderMatch,
     BracketRenderModel,
@@ -447,7 +447,31 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
 
         row = leaderboard_row_text(ranked)
 
-        self.assertEqual(row, "#1 <@user-1> `⭐ 10` - `🏆 Team A1`")
+        self.assertEqual(row, "#1 User One `⭐ 10` - `🏆 Team A1`")
+
+    def test_leaderboard_row_escapes_user_supplied_display_name(self) -> None:
+        ranked = RankedScore(
+            rank=1,
+            score=replace(_score(), display_name="@everyone **User**"),
+            champion_team_name="Team A1",
+        )
+
+        row = leaderboard_row_text(ranked)
+
+        self.assertNotIn("@everyone", row)
+        self.assertIn(r"\*\*User\*\*", row)
+
+    def test_leaderboard_row_escapes_champion_name(self) -> None:
+        ranked = RankedScore(
+            rank=1,
+            score=_score(),
+            champion_team_name="@everyone **Team**",
+        )
+
+        row = leaderboard_row_text(ranked)
+
+        self.assertNotIn("@everyone", row)
+        self.assertIn(r"\*\*Team\*\*", row)
 
     def test_leaderboard_snapshot_uses_browse_prompt_instead_of_pagination(self) -> None:
         ranked_scores = [
@@ -456,6 +480,7 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
                 score=replace(
                     _score(),
                     user_id=f"user-{index}",
+                    display_name=f"User {index}",
                     total_points=100 - index,
                 ),
                 champion_team_name=f"Team {index}",
@@ -468,8 +493,9 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(message.startswith("**Leaderboard**\n\nTop 25"))
         self.assertNotIn("Page", message)
         self.assertIn("Use `/leaderboard` to browse the full standings.", message)
-        self.assertIn("<@user-25>", message)
-        self.assertNotIn("<@user-26>", message)
+        self.assertIn("#25 User 25", message)
+        self.assertNotIn("User 26", message)
+        self.assertNotIn("<@", message)
 
     async def test_snapshot_allows_other_members_to_view_prediction_images(self) -> None:
         service = _view_service()
