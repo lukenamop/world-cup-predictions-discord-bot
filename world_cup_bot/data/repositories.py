@@ -1090,46 +1090,43 @@ class ResultRepository:
         details: dict[str, Any],
     ) -> bool:
         async with self.pool.acquire() as connection:
-            row = await connection.fetchrow(
+            return await connection.fetchval(
                 """
-                insert into result_sync_warnings (
-                    provider,
-                    config_hash,
-                    provider_match_id,
-                    warning_type,
-                    details
+                with inserted as (
+                    insert into result_sync_warnings (
+                        provider,
+                        config_hash,
+                        provider_match_id,
+                        warning_type,
+                        details
+                    )
+                    values ($1, $2, $3, 'provider_result_delay', $4::jsonb)
+                    on conflict (
+                        provider,
+                        config_hash,
+                        provider_match_id,
+                        warning_type
+                    ) do nothing
+                    returning id
+                ),
+                touched as (
+                    update result_sync_warnings set
+                        last_seen_at = now()
+                    where not exists (select 1 from inserted)
+                        and provider = $1
+                        and config_hash = $2
+                        and provider_match_id = $3
+                        and warning_type = 'provider_result_delay'
+                    returning id
                 )
-                values ($1, $2, $3, 'provider_result_delay', $4::jsonb)
-                on conflict (
-                    provider,
-                    config_hash,
-                    provider_match_id,
-                    warning_type
-                ) do nothing
-                returning id
+                select exists(select 1 from inserted)
+                from (select count(*) from touched) as refreshed
                 """,
                 provider,
                 config_hash,
                 provider_match_id,
                 json.dumps(details, sort_keys=True),
             )
-            if row is not None:
-                return True
-            await connection.execute(
-                """
-                update result_sync_warnings set
-                    last_seen_at = now()
-                where provider = $1
-                    and config_hash = $2
-                    and provider_match_id = $3
-                    and warning_type = 'provider_result_delay'
-                """,
-                provider,
-                config_hash,
-                provider_match_id,
-            )
-
-        return False
 
     async def list_match_results(
         self,
@@ -1173,12 +1170,52 @@ class ResultRepository:
         tournament_config_id: int,
         results: Sequence[StoredMatchResult],
     ) -> int:
-        applied = 0
+        if not results:
+            return 0
+
+        result_rows = [
+            {
+                "match_id": result.match_id,
+                "provider": result.provider,
+                "provider_match_id": result.provider_match_id,
+                "stage": result.stage,
+                "round_name": result.round_name,
+                "group_id": result.group_id,
+                "home_team_id": result.home_team_id,
+                "away_team_id": result.away_team_id,
+                "home_score": result.home_score,
+                "away_score": result.away_score,
+                "status": result.status,
+                "winner_team_id": result.winner_team_id,
+                "played_at": result.played_at.isoformat() if result.played_at else None,
+                "provider_payload": result.provider_payload,
+            }
+            for result in results
+        ]
         async with self.pool.acquire() as connection:
             async with connection.transaction():
-                for result in results:
-                    row_id = await connection.fetchval(
-                        """
+                return await connection.fetchval(
+                    """
+                    with incoming as (
+                        select *
+                        from jsonb_to_recordset($3::jsonb) as result (
+                            match_id text,
+                            provider text,
+                            provider_match_id text,
+                            stage text,
+                            round_name text,
+                            group_id text,
+                            home_team_id text,
+                            away_team_id text,
+                            home_score integer,
+                            away_score integer,
+                            status text,
+                            winner_team_id text,
+                            played_at timestamptz,
+                            provider_payload jsonb
+                        )
+                    ),
+                    upserted as (
                         insert into match_results (
                             guild_id,
                             tournament_config_id,
@@ -1198,11 +1235,25 @@ class ResultRepository:
                             provider_payload,
                             synced_at
                         )
-                        values (
-                            $1, $2, $3, $4, $5, $6, $7, $8,
-                            $9, $10, $11, $12, $13, $14, $15,
-                            $16::jsonb, now()
-                        )
+                        select
+                            $1,
+                            $2,
+                            match_id,
+                            provider,
+                            provider_match_id,
+                            stage,
+                            round_name,
+                            group_id,
+                            home_team_id,
+                            away_team_id,
+                            home_score,
+                            away_score,
+                            status,
+                            winner_team_id,
+                            played_at,
+                            provider_payload,
+                            now()
+                        from incoming
                         on conflict (guild_id, tournament_config_id, match_id)
                         do update set
                             provider = excluded.provider,
@@ -1250,27 +1301,14 @@ class ResultRepository:
                             excluded.provider_payload
                         )
                         returning id
-                        """,
-                        guild_id,
-                        tournament_config_id,
-                        result.match_id,
-                        result.provider,
-                        result.provider_match_id,
-                        result.stage,
-                        result.round_name,
-                        result.group_id,
-                        result.home_team_id,
-                        result.away_team_id,
-                        result.home_score,
-                        result.away_score,
-                        result.status,
-                        result.winner_team_id,
-                        result.played_at,
-                        json.dumps(result.provider_payload, sort_keys=True),
                     )
-                    if row_id is not None:
-                        applied += 1
-        return applied
+                    select count(*)::integer
+                    from upserted
+                    """,
+                    guild_id,
+                    tournament_config_id,
+                    json.dumps(result_rows, sort_keys=True),
+                )
 
     async def start_sync_run(
         self,
@@ -1617,55 +1655,70 @@ class PredictionScore:
     recalculated_at: datetime
 
 
+@dataclass(frozen=True)
+class RankedPredictionScoreRow:
+    rank: int
+    entry: PredictionEntry
+    score: PredictionScore | None
+
+
 class PredictionScoreRepository:
     def __init__(self, pool: Any) -> None:
         self.pool = pool
 
     async def upsert_scores(self, scores: Sequence[PredictionScore]) -> int:
+        if not scores:
+            return 0
+
+        score_rows = [
+            (
+                score.prediction_entry_id,
+                score.guild_id,
+                score.tournament_config_id,
+                score.user_id,
+                score.display_name,
+                score.total_points,
+                score.group_points,
+                score.knockout_points,
+                json.dumps(score.breakdown, sort_keys=True),
+                score.scoring_version,
+                score.recalculated_at,
+            )
+            for score in scores
+        ]
         async with self.pool.acquire() as connection:
             async with connection.transaction():
-                for score in scores:
-                    await connection.execute(
-                        """
-                        insert into prediction_scores (
-                            prediction_entry_id,
-                            guild_id,
-                            tournament_config_id,
-                            user_id,
-                            display_name,
-                            total_points,
-                            group_points,
-                            knockout_points,
-                            breakdown,
-                            scoring_version,
-                            recalculated_at
-                        )
-                        values (
-                            $1, $2, $3, $4, $5, $6, $7, $8,
-                            $9::jsonb, $10, $11
-                        )
-                        on conflict (prediction_entry_id)
-                        do update set
-                            display_name = excluded.display_name,
-                            total_points = excluded.total_points,
-                            group_points = excluded.group_points,
-                            knockout_points = excluded.knockout_points,
-                            breakdown = excluded.breakdown,
-                            scoring_version = excluded.scoring_version,
-                            recalculated_at = excluded.recalculated_at
-                        """,
-                        score.prediction_entry_id,
-                        score.guild_id,
-                        score.tournament_config_id,
-                        score.user_id,
-                        score.display_name,
-                        score.total_points,
-                        score.group_points,
-                        score.knockout_points,
-                        json.dumps(score.breakdown, sort_keys=True),
-                        score.scoring_version,
-                        score.recalculated_at,
+                await connection.executemany(
+                    """
+                    insert into prediction_scores (
+                        prediction_entry_id,
+                        guild_id,
+                        tournament_config_id,
+                        user_id,
+                        display_name,
+                        total_points,
+                        group_points,
+                        knockout_points,
+                        breakdown,
+                        scoring_version,
+                        recalculated_at
                     )
+                    values (
+                        $1, $2, $3, $4, $5, $6, $7, $8,
+                        $9::jsonb, $10, $11
+                    )
+                    on conflict (prediction_entry_id)
+                    do update set
+                        display_name = excluded.display_name,
+                        total_points = excluded.total_points,
+                        group_points = excluded.group_points,
+                        knockout_points = excluded.knockout_points,
+                        breakdown = excluded.breakdown,
+                        scoring_version = excluded.scoring_version,
+                        recalculated_at = excluded.recalculated_at
+                    """,
+                    score_rows,
+                )
         return len(scores)
 
     async def get_user_score(
@@ -1702,6 +1755,86 @@ class PredictionScoreRepository:
 
         return _row_to_prediction_score(row) if row else None
 
+    async def has_scores_needing_refresh(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+        scoring_version: str,
+    ) -> bool:
+        async with self.pool.acquire() as connection:
+            return bool(
+                await connection.fetchval(
+                    """
+                    select exists (
+                        select 1
+                        from prediction_entries pe
+                        left join prediction_scores ps
+                            on ps.prediction_entry_id = pe.id
+                        where pe.guild_id = $1
+                            and pe.tournament_config_id = $2
+                            and pe.submitted_data is not null
+                            and (
+                                ps.prediction_entry_id is null
+                                or ps.scoring_version <> $3
+                            )
+                    )
+                    """,
+                    guild_id,
+                    tournament_config_id,
+                    scoring_version,
+                )
+            )
+
+    async def list_ranked_score_rows(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+        limit: int | None,
+    ) -> list[RankedPredictionScoreRow]:
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                _RANKED_SCORE_ROWS_SQL
+                + """
+                select *
+                from ranked_scores
+                order by
+                    total_points desc,
+                    score_time asc,
+                    lower(display_name) asc,
+                    user_id asc
+                limit $3
+                """,
+                guild_id,
+                tournament_config_id,
+                limit,
+            )
+
+        return [_row_to_ranked_prediction_score(row) for row in rows]
+
+    async def get_ranked_score_row(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+        user_id: str,
+    ) -> RankedPredictionScoreRow | None:
+        async with self.pool.acquire() as connection:
+            row = await connection.fetchrow(
+                _RANKED_SCORE_ROWS_SQL
+                + """
+                select *
+                from ranked_scores
+                where user_id = $3
+                """,
+                guild_id,
+                tournament_config_id,
+                user_id,
+            )
+
+        return _row_to_ranked_prediction_score(row) if row else None
+
     async def list_scores(
         self,
         *,
@@ -1733,6 +1866,65 @@ class PredictionScoreRepository:
             )
 
         return [_row_to_prediction_score(row) for row in rows]
+
+
+_RANKED_SCORE_ROWS_SQL = """
+with ranked_scores as (
+    select
+        rank() over (
+            order by coalesce(ps.total_points, 0) desc
+        )::integer as rank,
+        pe.id,
+        pe.guild_id,
+        pe.tournament_config_id,
+        pe.user_id,
+        pe.display_name,
+        pe.draft_data,
+        pe.submitted_data,
+        pe.revision,
+        pe.draft_updated_at,
+        pe.submitted_at,
+        pe.submitted_updated_at,
+        ps.prediction_entry_id as score_prediction_entry_id,
+        coalesce(ps.total_points, 0) as total_points,
+        coalesce(ps.group_points, 0) as group_points,
+        coalesce(ps.knockout_points, 0) as knockout_points,
+        ps.breakdown,
+        ps.scoring_version,
+        coalesce(
+            ps.recalculated_at,
+            pe.submitted_updated_at,
+            pe.submitted_at,
+            pe.draft_updated_at
+        ) as score_time
+    from prediction_entries pe
+    left join prediction_scores ps
+        on ps.prediction_entry_id = pe.id
+    where pe.guild_id = $1
+        and pe.tournament_config_id = $2
+        and pe.submitted_data is not null
+)
+"""
+
+
+def _row_to_ranked_prediction_score(row: Any) -> RankedPredictionScoreRow:
+    entry = _row_to_prediction_entry(row)
+    score = None
+    if row["score_prediction_entry_id"] is not None:
+        score = PredictionScore(
+            prediction_entry_id=row["score_prediction_entry_id"],
+            guild_id=entry.guild_id,
+            tournament_config_id=entry.tournament_config_id,
+            user_id=entry.user_id,
+            display_name=entry.display_name,
+            total_points=row["total_points"],
+            group_points=row["group_points"],
+            knockout_points=row["knockout_points"],
+            breakdown=_json_dict(row["breakdown"]),
+            scoring_version=row["scoring_version"],
+            recalculated_at=row["score_time"],
+        )
+    return RankedPredictionScoreRow(rank=row["rank"], entry=entry, score=score)
 
 
 def _row_to_match_result(row: Any) -> StoredMatchResult:

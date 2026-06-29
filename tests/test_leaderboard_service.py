@@ -9,6 +9,7 @@ from pathlib import Path
 from world_cup_bot.data.repositories import (
     ActiveTournamentConfig,
     PredictionEntry,
+    RankedPredictionScoreRow,
     PredictionScore,
 )
 from world_cup_bot.domain.predictions import TournamentModel
@@ -126,7 +127,7 @@ def _leaderboard_service(
     service = LeaderboardService(pool=None)
     service.tournaments = _TournamentRepository(config)
     service.predictions = _PredictionRepository(entries)
-    service.scores = _ScoreRepository(scores)
+    service.scores = _ScoreRepository(entries, scores)
     return service
 
 
@@ -190,8 +191,35 @@ class _PredictionRepository:
 
 
 class _ScoreRepository:
-    def __init__(self, scores: list[PredictionScore]) -> None:
+    def __init__(
+        self,
+        entries: list[PredictionEntry],
+        scores: list[PredictionScore],
+    ) -> None:
+        self.entries = entries
         self.scores = scores
+
+    async def list_ranked_score_rows(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+        limit: int | None,
+    ) -> list[RankedPredictionScoreRow]:
+        rows = _ranked_rows(self.entries, self.scores)
+        return rows if limit is None else rows[:limit]
+
+    async def get_ranked_score_row(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+        user_id: str,
+    ) -> RankedPredictionScoreRow | None:
+        for row in _ranked_rows(self.entries, self.scores):
+            if row.entry.user_id == user_id:
+                return row
+        return None
 
     async def list_scores(
         self,
@@ -200,3 +228,58 @@ class _ScoreRepository:
         tournament_config_id: int,
     ) -> list[PredictionScore]:
         return list(self.scores)
+
+
+def _ranked_rows(
+    entries: list[PredictionEntry],
+    scores: list[PredictionScore],
+) -> list[RankedPredictionScoreRow]:
+    score_by_entry_id = {score.prediction_entry_id: score for score in scores}
+    sortable = [
+        (
+            score_by_entry_id.get(entry.id)
+            or PredictionScore(
+                prediction_entry_id=entry.id,
+                guild_id=entry.guild_id,
+                tournament_config_id=entry.tournament_config_id,
+                user_id=entry.user_id,
+                display_name=entry.display_name,
+                total_points=0,
+                group_points=0,
+                knockout_points=0,
+                breakdown={"groups": {}, "knockout": {}},
+                scoring_version=SCORING_VERSION,
+                recalculated_at=(
+                    entry.submitted_updated_at
+                    or entry.submitted_at
+                    or entry.draft_updated_at
+                    or datetime.now(timezone.utc)
+                ),
+            ),
+            entry,
+        )
+        for entry in entries
+    ]
+    sortable.sort(
+        key=lambda item: (
+            -item[0].total_points,
+            item[0].recalculated_at,
+            item[0].display_name.casefold(),
+            item[0].user_id,
+        )
+    )
+    rows: list[RankedPredictionScoreRow] = []
+    previous_points: int | None = None
+    current_rank = 0
+    for index, (score, entry) in enumerate(sortable, start=1):
+        if score.total_points != previous_points:
+            current_rank = index
+            previous_points = score.total_points
+        rows.append(
+            RankedPredictionScoreRow(
+                rank=current_rank,
+                entry=entry,
+                score=score_by_entry_id.get(entry.id),
+            )
+        )
+    return rows

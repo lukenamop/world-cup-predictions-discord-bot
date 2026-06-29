@@ -6,9 +6,11 @@ from typing import Any
 
 from world_cup_bot.data.repositories import (
     GuildActiveTournamentConfig,
+    PredictionScoreRepository,
     ResultRepository,
     TournamentConfigRepository,
 )
+from world_cup_bot.domain.scoring import SCORING_VERSION
 from world_cup_bot.services.leaderboard_service import (
     LeaderboardService,
     LeaderboardServiceError,
@@ -40,6 +42,12 @@ class ResultSyncJobReport:
     summaries: list[ResultSyncSummary]
     failures: list[ResultSyncFailure]
     fetched_match_count: int
+
+
+@dataclass(frozen=True)
+class ResultSyncRecalculation:
+    scored_prediction_count: int
+    scoring_version: str
 
 
 async def sync_all_active_guilds(bot: Any) -> ResultSyncJobReport:
@@ -102,8 +110,10 @@ async def sync_all_active_guilds(bot: Any) -> ResultSyncJobReport:
                     tournament=tournament,
                     fetched=fetched,
                 )
-                recalculation = await LeaderboardService(bot.database.pool).recalculate(
-                    guild_id=guild_id
+                recalculation = await _recalculate_if_results_changed(
+                    bot.database.pool,
+                    summary=summary,
+                    guild_id=guild_id,
                 )
             except (ResultSyncServiceError, LeaderboardServiceError) as exc:
                 LOGGER.exception("Result sync job failed for guild_id=%s", guild_id)
@@ -179,8 +189,10 @@ async def seed_sample_results_all_active_guilds(bot: Any) -> ResultSyncJobReport
                     tournament=tournament,
                     fetched=fetched,
                 )
-                recalculation = await LeaderboardService(bot.database.pool).recalculate(
-                    guild_id=tournament.guild_id
+                recalculation = await _recalculate_if_results_changed(
+                    bot.database.pool,
+                    summary=summary,
+                    guild_id=tournament.guild_id,
                 )
             except (ResultSyncServiceError, LeaderboardServiceError) as exc:
                 LOGGER.exception(
@@ -219,3 +231,28 @@ def _group_by_config_hash(
     for tournament in tournaments:
         grouped.setdefault(tournament.config_hash, []).append(tournament)
     return grouped
+
+
+async def _recalculate_if_results_changed(
+    pool: Any,
+    *,
+    summary: ResultSyncSummary,
+    guild_id: str,
+) -> ResultSyncRecalculation:
+    if summary.applied_match_count == 0:
+        needs_refresh = await PredictionScoreRepository(pool).has_scores_needing_refresh(
+            guild_id=guild_id,
+            tournament_config_id=summary.sync_run.tournament_config_id,
+            scoring_version=SCORING_VERSION,
+        )
+        if not needs_refresh:
+            return ResultSyncRecalculation(
+                scored_prediction_count=0,
+                scoring_version=SCORING_VERSION,
+            )
+
+    recalculation = await LeaderboardService(pool).recalculate(guild_id=guild_id)
+    return ResultSyncRecalculation(
+        scored_prediction_count=recalculation.scored_prediction_count,
+        scoring_version=recalculation.scoring_version,
+    )

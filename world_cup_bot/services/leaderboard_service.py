@@ -8,6 +8,7 @@ from world_cup_bot.data.repositories import (
     GuildSettingsRepository,
     PredictionEntry,
     PredictionRepository,
+    RankedPredictionScoreRow,
     PredictionScore,
     PredictionScoreRepository,
     ResultRepository,
@@ -135,15 +136,14 @@ class LeaderboardService:
         tournament = await self.tournaments.get_active_config(guild_id)
         if tournament is None:
             raise LeaderboardServiceError("Ask an admin to import tournament data first.")
-        scores = await self._ranked_scores(
+        row = await self.scores.get_ranked_score_row(
             guild_id=guild_id,
             tournament_config_id=tournament.id,
-            model=TournamentModel.from_config(tournament.config),
+            user_id=user_id,
         )
-        for ranked in scores:
-            if ranked.score.user_id == user_id:
-                return ranked
-        return None
+        if row is None:
+            return None
+        return _ranked_score_from_row(row, model=TournamentModel.from_config(tournament.config))
 
     async def top_scores(
         self,
@@ -154,64 +154,31 @@ class LeaderboardService:
         tournament = await self.tournaments.get_active_config(guild_id)
         if tournament is None:
             raise LeaderboardServiceError("Ask an admin to import tournament data first.")
-        scores = await self._ranked_scores(
+        rows = await self.scores.list_ranked_score_rows(
             guild_id=guild_id,
             tournament_config_id=tournament.id,
-            model=TournamentModel.from_config(tournament.config),
+            limit=limit,
         )
-        return scores if limit is None else scores[:limit]
+        model = TournamentModel.from_config(tournament.config)
+        return [_ranked_score_from_row(row, model=model) for row in rows]
 
-    async def _ranked_scores(
-        self,
-        *,
-        guild_id: str,
-        tournament_config_id: int,
-        model: TournamentModel,
-    ) -> list[RankedScore]:
-        scores = await self.scores.list_scores(
-            guild_id=guild_id,
-            tournament_config_id=tournament_config_id,
-        )
-        entries = await self.predictions.list_submitted_entries(
-            guild_id=guild_id,
-            tournament_config_id=tournament_config_id,
-        )
-        score_by_entry_id = {score.prediction_entry_id: score for score in scores}
-        for entry in entries:
-            if entry.submitted_data is None or entry.id in score_by_entry_id:
-                continue
-            scores.append(
-                _unscored_prediction_score(
-                    entry,
-                    guild_id=guild_id,
-                    tournament_config_id=tournament_config_id,
-                    model=model,
-                )
-            )
-        scores.sort(
-            key=lambda score: (
-                -score.total_points,
-                score.recalculated_at,
-                score.display_name.casefold(),
-                score.user_id,
-            )
-        )
-        champion_by_entry_id = _champion_names_by_entry_id(model, entries)
-        ranked: list[RankedScore] = []
-        previous_points: int | None = None
-        current_rank = 0
-        for index, score in enumerate(scores, start=1):
-            if previous_points != score.total_points:
-                current_rank = index
-                previous_points = score.total_points
-            ranked.append(
-                RankedScore(
-                    rank=current_rank,
-                    score=score,
-                    champion_team_name=champion_by_entry_id.get(score.prediction_entry_id),
-                )
-            )
-        return ranked
+
+def _ranked_score_from_row(
+    row: RankedPredictionScoreRow,
+    *,
+    model: TournamentModel,
+) -> RankedScore:
+    score = row.score or _unscored_prediction_score(
+        row.entry,
+        guild_id=row.entry.guild_id,
+        tournament_config_id=row.entry.tournament_config_id,
+        model=model,
+    )
+    return RankedScore(
+        rank=row.rank,
+        score=score,
+        champion_team_name=_champion_name_for_entry(model, row.entry),
+    )
 
 
 def _unscored_prediction_score(
@@ -270,20 +237,17 @@ def _empty_score_details() -> dict[str, Any]:
     }
 
 
-def _champion_names_by_entry_id(
+def _champion_name_for_entry(
     model: TournamentModel,
-    entries: list[PredictionEntry],
-) -> dict[int, str]:
-    champion_names: dict[int, str] = {}
-    for entry in entries:
-        if entry.submitted_data is None:
-            continue
-        try:
-            summary = prediction_summary(model, entry.submitted_data)
-            champion_names[entry.id] = model.team(summary.champion_team_id).short_name
-        except PredictionValidationError:
-            continue
-    return champion_names
+    entry: PredictionEntry,
+) -> str | None:
+    if entry.submitted_data is None:
+        return None
+    try:
+        summary = prediction_summary(model, entry.submitted_data)
+        return model.team(summary.champion_team_id).short_name
+    except PredictionValidationError:
+        return None
 
 
 def _to_domain_result(result: StoredMatchResult) -> MatchResult:

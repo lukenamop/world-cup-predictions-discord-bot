@@ -40,7 +40,9 @@ class PredictionSnapshot:
     viewer_user_id: str
     target_user_id: str
     display_name: str
+    tournament_id: str
     tournament_name: str
+    config_hash: str
     model: TournamentModel
     settings: GuildSettings | None
     entry: PredictionEntry
@@ -162,7 +164,9 @@ class PredictionViewService:
             viewer_user_id=viewer_user_id,
             target_user_id=target_user_id,
             display_name=entry.display_name,
+            tournament_id=tournament.tournament_id,
             tournament_name=tournament.tournament_name,
+            config_hash=tournament.config_hash,
             model=model,
             settings=settings,
             entry=entry,
@@ -182,19 +186,25 @@ class PredictionViewService:
         guild_id: str,
         tournament_config_id: int,
         model: TournamentModel,
+        tournament_id: str | None = None,
+        config_hash: str | None = None,
     ) -> dict[str, Any]:
         stored_results = await self.results.list_match_results(
             guild_id=guild_id,
             tournament_config_id=tournament_config_id,
         )
-        tournament = await self.tournaments.get_active_config(guild_id)
         adjudications = []
-        if tournament is not None and tournament.id == tournament_config_id:
+        if tournament_id is None or config_hash is None:
+            tournament = await self.tournaments.get_active_config(guild_id)
+            if tournament is not None and tournament.id == tournament_config_id:
+                tournament_id = tournament.tournament_id
+                config_hash = tournament.config_hash
+        if tournament_id is not None and config_hash is not None:
             adjudications = [
                 adjudication.to_domain()
                 for adjudication in await self.tie_breakers.list_for_config(
-                    tournament_id=tournament.tournament_id,
-                    config_hash=tournament.config_hash,
+                    tournament_id=tournament_id,
+                    config_hash=config_hash,
                 )
             ]
         try:

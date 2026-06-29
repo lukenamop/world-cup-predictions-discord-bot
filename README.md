@@ -294,7 +294,7 @@ Live results use `LIVE_RESULTS_PROVIDER`, defaulting to `fifa_public_calendar`. 
 
 The bot starts a 30-minute background sync loop after startup. Scheduled sync does not fetch the provider endpoint before `2026-06-11T00:00:00Z`, the first matchday midnight in UTC. `/operator sync` is an explicit manual override and attempts a provider fetch even before that date.
 
-Once active, scheduled sync fetches once per provider/config feed, applies inserted or changed results to all configured guilds, writes `match_results` and `result_sync_runs`, caches raw provider response payloads for debugging, stores normalized per-match provider metadata with results, logs delayed-provider warnings once, and recalculates scores for submitted predictions. Unchanged provider rows are left alone and do not increase the sync run's applied match count.
+Once active, scheduled sync fetches once per provider/config feed, applies inserted or changed results to all configured guilds, writes `match_results` and `result_sync_runs`, caches raw provider response payloads for debugging, stores normalized per-match provider metadata with results, logs delayed-provider warnings once, and recalculates scores for submitted predictions when stored results changed. No-op syncs skip recalculation when every submitted prediction already has a current score; they still refresh missing or stale scores after a scoring-version change. Unchanged provider rows are left alone and do not increase the sync run's applied match count.
 
 Official group standings use the 2026 FIFA tie-breaker order: head-to-head points, head-to-head goal difference, head-to-head goals scored, overall goal difference, overall goals scored, team conduct score, then the most recent FIFA/Coca-Cola Men's World Ranking. Best third-place ranking uses points, goal difference, goals scored, team conduct score, then FIFA ranking. If stored results cannot resolve a required tie from deterministic match data, recalculation fails loudly until an operator records the official adjudication with `/operator resolve`.
 
@@ -302,7 +302,7 @@ Official group standings use the 2026 FIFA tie-breaker order: head-to-head point
 
 Migrations are plain numbered SQL files in `world_cup_bot/data/migrations`. They run automatically at bot startup and in `scripts/healthcheck.py`. Applied migration names are tracked in `schema_migrations`.
 
-Migration `010_normalize_generated_knockout_ids.sql` normalizes legacy generated knockout match IDs in stored predictions and prediction history after the Round of 16 ID format was made contiguous. Migration `011_share_prediction_images.sql` removes obsolete visibility preference storage for the current command behavior.
+Migration `010_normalize_generated_knockout_ids.sql` normalizes legacy generated knockout match IDs in stored predictions and prediction history after the Round of 16 ID format was made contiguous. Migration `011_share_prediction_images.sql` removes obsolete visibility preference storage for the current command behavior. Migration `012_database_efficiency_indexes.sql` adds indexes for submitted prediction lookups, leaderboard ranking, and recent result sync runs.
 
 ### Tests
 

@@ -170,6 +170,8 @@ class PredictionsCog(commands.Cog):
                 guild_id=snapshot.guild_id,
                 tournament_config_id=snapshot.entry.tournament_config_id,
                 model=snapshot.model,
+                tournament_id=snapshot.tournament_id,
+                config_hash=snapshot.config_hash,
             )
         except PredictionViewServiceError as exc:
             await ctx.respond(str(exc), ephemeral=True)

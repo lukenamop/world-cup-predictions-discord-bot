@@ -215,6 +215,8 @@ class OperatorCog(commands.Cog):
                 guild_id=normalized_guild_id,
                 tournament_config_id=snapshot.entry.tournament_config_id,
                 model=snapshot.model,
+                tournament_id=snapshot.tournament_id,
+                config_hash=snapshot.config_hash,
             )
         except PredictionViewServiceError as exc:
             await ctx.respond(

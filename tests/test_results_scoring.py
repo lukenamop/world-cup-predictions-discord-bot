@@ -5,9 +5,16 @@ import random
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from world_cup_bot.data.repositories import ResultRepository, StoredMatchResult
+from world_cup_bot.data.repositories import (
+    PredictionScore,
+    PredictionScoreRepository,
+    ResultRepository,
+    StoredMatchResult,
+)
+from world_cup_bot.jobs import result_sync as result_sync_job
 from world_cup_bot.domain.predictions import (
     ROUND_ORDER,
     RoundMatch,
@@ -35,6 +42,7 @@ from world_cup_bot.services.live_results_client import (
     _parse_fifa_match,
 )
 from world_cup_bot.services.result_sync_service import (
+    ResultSyncSummary,
     ResultSyncService,
     ResultSyncServiceError,
     _map_live_results,
@@ -719,7 +727,7 @@ class ResultSyncServiceTests(unittest.IsolatedAsyncioTestCase):
 
 class ResultRepositoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_upsert_match_results_counts_only_inserted_or_changed_rows(self) -> None:
-        pool = _FakePool(fetchval_results=[101, None])
+        pool = _FakePool(fetchval_results=[1])
         repository = ResultRepository(pool)
 
         applied = await repository.upsert_match_results(
@@ -732,9 +740,141 @@ class ResultRepositoryTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(applied, 1)
-        self.assertEqual(pool.connection.fetchval_call_count, 2)
+        self.assertEqual(pool.connection.fetchval_call_count, 1)
+        self.assertIn("jsonb_to_recordset", pool.connection.fetchval_sql.lower())
         self.assertIn("is distinct from", pool.connection.fetchval_sql.lower())
-        self.assertIn("returning id", pool.connection.fetchval_sql.lower())
+        self.assertIn("count(*)", pool.connection.fetchval_sql.lower())
+
+    async def test_upsert_match_results_empty_batch_skips_database(self) -> None:
+        pool = _FakePool()
+        repository = ResultRepository(pool)
+
+        applied = await repository.upsert_match_results(
+            guild_id="guild-1",
+            tournament_config_id=7,
+            results=[],
+        )
+
+        self.assertEqual(applied, 0)
+        self.assertEqual(pool.connection.fetchval_call_count, 0)
+
+    async def test_record_delay_warning_once_refreshes_in_one_query(self) -> None:
+        pool = _FakePool(fetchval_results=[False])
+        repository = ResultRepository(pool)
+
+        inserted = await repository.record_delay_warning_once(
+            provider="fifa_public_calendar",
+            config_hash="hash-1",
+            provider_match_id="provider-A-1",
+            details={"match_id": "A-1"},
+        )
+
+        self.assertFalse(inserted)
+        self.assertEqual(pool.connection.fetchval_call_count, 1)
+        self.assertEqual(pool.connection.execute_call_count, 0)
+        self.assertIn("with inserted as", pool.connection.fetchval_sql.lower())
+        self.assertIn("last_seen_at", pool.connection.fetchval_sql.lower())
+
+
+class PredictionScoreRepositoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upsert_scores_uses_one_batch_call(self) -> None:
+        pool = _FakePool()
+        repository = PredictionScoreRepository(pool)
+
+        count = await repository.upsert_scores(
+            [
+                _prediction_score(prediction_entry_id=1, total_points=9),
+                _prediction_score(prediction_entry_id=2, total_points=7),
+            ]
+        )
+
+        self.assertEqual(count, 2)
+        self.assertEqual(pool.connection.executemany_call_count, 1)
+        self.assertEqual(pool.connection.execute_call_count, 0)
+        self.assertEqual(len(pool.connection.executemany_args), 2)
+        self.assertIn("on conflict", pool.connection.executemany_sql.lower())
+
+    async def test_upsert_scores_empty_batch_skips_database(self) -> None:
+        pool = _FakePool()
+        repository = PredictionScoreRepository(pool)
+
+        count = await repository.upsert_scores([])
+
+        self.assertEqual(count, 0)
+        self.assertEqual(pool.connection.executemany_call_count, 0)
+
+    async def test_has_scores_needing_refresh_checks_missing_and_stale_scores(self) -> None:
+        pool = _FakePool(fetchval_results=[True])
+        repository = PredictionScoreRepository(pool)
+
+        needs_refresh = await repository.has_scores_needing_refresh(
+            guild_id="guild-1",
+            tournament_config_id=7,
+            scoring_version="current-version",
+        )
+
+        self.assertTrue(needs_refresh)
+        self.assertEqual(pool.connection.fetchval_call_count, 1)
+        self.assertIn("select exists", pool.connection.fetchval_sql.lower())
+        self.assertIn("submitted_data is not null", pool.connection.fetchval_sql.lower())
+        self.assertIn("left join prediction_scores", pool.connection.fetchval_sql.lower())
+        self.assertIn("scoring_version <> $3", pool.connection.fetchval_sql.lower())
+
+
+class ResultSyncJobTests(unittest.IsolatedAsyncioTestCase):
+    async def test_noop_sync_skips_recalculation_when_all_submissions_are_scored(self) -> None:
+        score_probe = _FakeScoreProbe(needs_refresh=False)
+
+        with (
+            patch(
+                "world_cup_bot.jobs.result_sync.PredictionScoreRepository",
+                return_value=score_probe,
+            ),
+            patch(
+                "world_cup_bot.jobs.result_sync.LeaderboardService",
+                side_effect=AssertionError("no recalculation expected"),
+            ),
+        ):
+            recalculation = await result_sync_job._recalculate_if_results_changed(
+                object(),
+                summary=_sync_summary(applied_match_count=0),
+                guild_id="guild-1",
+            )
+
+        self.assertEqual(recalculation.scored_prediction_count, 0)
+        self.assertEqual(recalculation.scoring_version, result_sync_job.SCORING_VERSION)
+        self.assertEqual(
+            score_probe.calls,
+            [("guild-1", 7, result_sync_job.SCORING_VERSION)],
+        )
+
+    async def test_noop_sync_recalculates_when_submissions_lack_scores(self) -> None:
+        score_probe = _FakeScoreProbe(needs_refresh=True)
+        leaderboard = _FakeLeaderboard()
+
+        with (
+            patch(
+                "world_cup_bot.jobs.result_sync.PredictionScoreRepository",
+                return_value=score_probe,
+            ),
+            patch(
+                "world_cup_bot.jobs.result_sync.LeaderboardService",
+                return_value=leaderboard,
+            ),
+        ):
+            recalculation = await result_sync_job._recalculate_if_results_changed(
+                object(),
+                summary=_sync_summary(applied_match_count=0),
+                guild_id="guild-1",
+            )
+
+        self.assertEqual(recalculation.scored_prediction_count, 3)
+        self.assertEqual(recalculation.scoring_version, "test-version")
+        self.assertEqual(
+            score_probe.calls,
+            [("guild-1", 7, result_sync_job.SCORING_VERSION)],
+        )
+        self.assertEqual(leaderboard.guild_ids, ["guild-1"])
 
 
 class _ActiveTournamentRepo:
@@ -753,8 +893,8 @@ class _UnexpectedResultRepo:
 
 
 class _FakePool:
-    def __init__(self, *, fetchval_results: list[int | None]) -> None:
-        self.connection = _FakeConnection(fetchval_results)
+    def __init__(self, *, fetchval_results: list[object] | None = None) -> None:
+        self.connection = _FakeConnection(fetchval_results or [])
 
     def acquire(self) -> "_FakeAcquire":
         return _FakeAcquire(self.connection)
@@ -772,18 +912,34 @@ class _FakeAcquire:
 
 
 class _FakeConnection:
-    def __init__(self, fetchval_results: list[int | None]) -> None:
+    def __init__(self, fetchval_results: list[object]) -> None:
         self.fetchval_results = fetchval_results
+        self.execute_call_count = 0
         self.fetchval_call_count = 0
         self.fetchval_sql = ""
+        self.executemany_call_count = 0
+        self.executemany_sql = ""
+        self.executemany_args: list[tuple[object, ...]] = []
 
     def transaction(self) -> "_FakeTransaction":
         return _FakeTransaction()
 
-    async def fetchval(self, sql: str, *args: object) -> int | None:
+    async def fetchval(self, sql: str, *args: object) -> object:
         self.fetchval_call_count += 1
         self.fetchval_sql = sql
         return self.fetchval_results.pop(0)
+
+    async def execute(self, sql: str, *args: object) -> None:
+        self.execute_call_count += 1
+
+    async def executemany(
+        self,
+        sql: str,
+        args: list[tuple[object, ...]],
+    ) -> None:
+        self.executemany_call_count += 1
+        self.executemany_sql = sql
+        self.executemany_args = args
 
 
 class _FakeTransaction:
@@ -803,6 +959,44 @@ class _FakeFifaResponse:
 
     def read(self) -> bytes:
         return b'{"Results": []}'
+
+
+class _FakeScoreProbe:
+    def __init__(self, *, needs_refresh: bool) -> None:
+        self.needs_refresh = needs_refresh
+        self.calls: list[tuple[str, int, str]] = []
+
+    async def has_scores_needing_refresh(
+        self,
+        *,
+        guild_id: str,
+        tournament_config_id: int,
+        scoring_version: str,
+    ) -> bool:
+        self.calls.append((guild_id, tournament_config_id, scoring_version))
+        return self.needs_refresh
+
+
+class _FakeLeaderboard:
+    def __init__(self) -> None:
+        self.guild_ids: list[str] = []
+
+    async def recalculate(self, *, guild_id: str) -> object:
+        self.guild_ids.append(guild_id)
+        return SimpleNamespace(
+            scored_prediction_count=3,
+            scoring_version="test-version",
+        )
+
+
+def _sync_summary(*, applied_match_count: int) -> ResultSyncSummary:
+    return ResultSyncSummary(
+        sync_run=SimpleNamespace(tournament_config_id=7),
+        fetched_match_count=2,
+        applied_match_count=applied_match_count,
+        skipped_match_count=0,
+        warning_count=0,
+    )
 
 
 def _complete_home_winner_prediction(model: TournamentModel) -> dict[str, object]:
@@ -931,6 +1125,26 @@ def _stored_match_result(match_id: str) -> StoredMatchResult:
         winner_team_id="A1",
         played_at=datetime(2026, 6, 11, 20, 0, tzinfo=timezone.utc),
         provider_payload={"id": match_id},
+    )
+
+
+def _prediction_score(
+    *,
+    prediction_entry_id: int,
+    total_points: int,
+) -> PredictionScore:
+    return PredictionScore(
+        prediction_entry_id=prediction_entry_id,
+        guild_id="guild-1",
+        tournament_config_id=7,
+        user_id=f"user-{prediction_entry_id}",
+        display_name=f"User {prediction_entry_id}",
+        total_points=total_points,
+        group_points=total_points,
+        knockout_points=0,
+        breakdown={"groups": {}, "knockout": {}},
+        scoring_version="test-version",
+        recalculated_at=datetime(2026, 6, 12, tzinfo=timezone.utc),
     )
 
 
