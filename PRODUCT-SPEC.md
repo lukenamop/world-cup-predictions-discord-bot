@@ -172,7 +172,7 @@ Scoring is configurable per guild. Setup should offer these suggested defaults:
 - Correct champion: 25 points.
 - Correct runner-up: 15 points.
 
-Knockout scoring is team-advancement based, not slot-exact. Users get credit when a predicted team reaches the relevant round even if the exact bracket path differs from their prediction. Champion points stack with prior knockout advancement points.
+Knockout scoring is team-advancement based, not slot-exact. Users get credit when a predicted team reaches the relevant round even if the exact bracket path differs from their prediction. Advancement points are awarded as each knockout result proves a team reached the next round; the full destination round does not need to be populated first. Champion points stack with prior knockout advancement points.
 
 ## Discord Commands
 

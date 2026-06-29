@@ -14,6 +14,7 @@ from world_cup_bot.data.repositories import (
 )
 from world_cup_bot.cogs.leaderboard import leaderboard_embed
 from world_cup_bot.domain.predictions import (
+    ROUND_ORDER,
     TournamentModel,
     empty_prediction_data,
     next_prediction_step,
@@ -44,6 +45,13 @@ except ModuleNotFoundError:
     PIL_AVAILABLE = False
 else:
     PIL_AVAILABLE = True
+
+
+_ADVANCEMENT_SOURCE_ROUNDS = tuple(
+    round_name
+    for round_name in ROUND_ORDER
+    if round_name not in {"third_place", "final"}
+)
 
 
 class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
@@ -165,6 +173,39 @@ class MilestoneFiveViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(later_match.home_status.state, "correct")
         self.assertEqual(later_match.home_status.label, "+1")
         self.assertEqual(later_match.away_status.state, "correct")
+
+    def test_bracket_render_model_marks_partial_winner_in_each_later_round(self) -> None:
+        snapshot = _snapshot()
+        transitions = (
+            ("round_of_32", "Round of 16", "+2"),
+            ("round_of_16", "Quarter-finals", "+5"),
+            ("quarter_finals", "Semi-finals", "+10"),
+            ("semi_finals", "Final", "+15"),
+        )
+
+        for current_round, next_round_label, expected_label in transitions:
+            with self.subTest(current_round=current_round):
+                actual_data = _actual_data_with_partial_knockout_round(
+                    snapshot.data,
+                    current_round,
+                )
+
+                render_model = bracket_render_model(snapshot, actual_data)
+                next_match = next(
+                    match
+                    for match in render_model.matches
+                    if match.round_label == next_round_label
+                    and "Team A1" in {match.home_team_name, match.away_team_name}
+                )
+                team_status = (
+                    next_match.home_status
+                    if next_match.home_team_name == "Team A1"
+                    else next_match.away_status
+                )
+
+                self.assertEqual(team_status.state, "correct")
+                self.assertEqual(team_status.label, expected_label)
+                self.assertEqual(next_match.status.state, "pending")
 
     def test_bracket_render_model_marks_future_rows_after_early_elimination(self) -> None:
         snapshot = _snapshot()
@@ -656,9 +697,22 @@ def _actual_data_with_shifted_round_of_32(
 def _actual_data_with_partial_round_of_32(
     prediction_data: dict[str, object],
 ) -> dict[str, object]:
+    return _actual_data_with_partial_knockout_round(prediction_data, "round_of_32")
+
+
+def _actual_data_with_partial_knockout_round(
+    prediction_data: dict[str, object],
+    partial_round: str,
+) -> dict[str, object]:
     actual_data = deepcopy(prediction_data)
-    round_of_32 = deepcopy(actual_data["knockout"]["round_of_32"])
-    actual_data["knockout"] = {"round_of_32": [round_of_32[0]]}
+    knockout = {}
+    for round_name in _ADVANCEMENT_SOURCE_ROUNDS:
+        round_entries = deepcopy(actual_data["knockout"][round_name])
+        if round_name == partial_round:
+            knockout[round_name] = [round_entries[0]]
+            break
+        knockout[round_name] = round_entries
+    actual_data["knockout"] = knockout
     return actual_data
 
 

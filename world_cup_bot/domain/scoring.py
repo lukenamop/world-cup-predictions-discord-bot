@@ -19,6 +19,9 @@ from world_cup_bot.domain.standings import (
 
 
 SCORING_VERSION = "2026-default-v2"
+_ADVANCEMENT_ROUNDS = tuple(
+    round_name for round_name in ROUND_ORDER if round_name != "third_place"
+)
 
 
 @dataclass(frozen=True)
@@ -357,17 +360,25 @@ def _advancement_by_round(
     data: Mapping[str, Any],
 ) -> dict[str, set[str]]:
     advancement: dict[str, set[str]] = {}
-    for round_name in ROUND_ORDER:
+    for index, round_name in enumerate(_ADVANCEMENT_ROUNDS):
+        source_round = round_name if index == 0 else _ADVANCEMENT_ROUNDS[index - 1]
         try:
-            matches = get_round_matches(model, data, round_name)
+            matches = get_round_matches(model, data, source_round)
         except PredictionValidationError:
             continue
-        team_ids = {
-            team_id
-            for match in matches
-            for team_id in (match.home_team_id, match.away_team_id)
-            if team_id
-        }
+        if index == 0:
+            team_ids = {
+                team_id
+                for match in matches
+                for team_id in (match.home_team_id, match.away_team_id)
+                if team_id
+            }
+        else:
+            team_ids = {
+                match.winner_team_id
+                for match in matches
+                if match.winner_team_id
+            }
         if team_ids:
             advancement[round_name] = team_ids
     return advancement

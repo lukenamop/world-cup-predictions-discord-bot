@@ -439,13 +439,12 @@ def _knockout_team_status(
 ) -> RenderStatus:
     if round_name == "third_place":
         return _knockout_pick_status(model, actual_data, round_name, team_id, rules)
+    if _team_reached_round(model, actual_data, team_id, round_name):
+        return RenderStatus(
+            label=f"+{_knockout_advancement_points(round_name, rules)}",
+            state="correct",
+        )
     actual_matches = _actual_matches(model, actual_data, round_name)
-    for match in actual_matches:
-        if team_id in {match.home_team_id, match.away_team_id}:
-            return RenderStatus(
-                label=f"+{_knockout_advancement_points(round_name, rules)}",
-                state="correct",
-            )
     if _team_cannot_reach_round(model, actual_data, team_id, round_name):
         return RenderStatus(label="X", state="incorrect")
     if not actual_matches:
@@ -494,22 +493,18 @@ def _placement_team_id(
     return third_place[0].winner_team_id
 
 
-def _is_advancement_round(round_name: str) -> bool:
-    return round_name in {
-        "round_of_32",
-        "round_of_16",
-        "quarter_finals",
-        "semi_finals",
-    }
-
-
-_MAIN_BRACKET_ROUNDS = (
-    "round_of_32",
-    "round_of_16",
-    "quarter_finals",
-    "semi_finals",
-    "final",
+_MAIN_BRACKET_ROUNDS = tuple(
+    round_name for round_name in ROUND_ORDER if round_name != "third_place"
 )
+_ADVANCEMENT_ROUNDS = _MAIN_BRACKET_ROUNDS[:-1]
+_MAIN_BRACKET_ROUND_INDEX = {
+    round_name: index
+    for index, round_name in enumerate(_MAIN_BRACKET_ROUNDS)
+}
+
+
+def _is_advancement_round(round_name: str) -> bool:
+    return round_name in _ADVANCEMENT_ROUNDS
 
 
 def _placement_impossible(
@@ -538,18 +533,36 @@ def _team_cannot_reach_round(
         if _team_won_round(model, actual_data, team_id, "semi_finals"):
             return True
         return (
-            eliminated_in in _MAIN_BRACKET_ROUNDS
-            and _MAIN_BRACKET_ROUNDS.index(eliminated_in)
-            < _MAIN_BRACKET_ROUNDS.index("semi_finals")
+            eliminated_in in _MAIN_BRACKET_ROUND_INDEX
+            and _MAIN_BRACKET_ROUND_INDEX[eliminated_in]
+            < _MAIN_BRACKET_ROUND_INDEX["semi_finals"]
         )
     if (
-        round_name not in _MAIN_BRACKET_ROUNDS
-        or eliminated_in not in _MAIN_BRACKET_ROUNDS
+        round_name not in _MAIN_BRACKET_ROUND_INDEX
+        or eliminated_in not in _MAIN_BRACKET_ROUND_INDEX
     ):
         return False
-    return _MAIN_BRACKET_ROUNDS.index(eliminated_in) < _MAIN_BRACKET_ROUNDS.index(
+    return _MAIN_BRACKET_ROUND_INDEX[eliminated_in] < _MAIN_BRACKET_ROUND_INDEX[
         round_name
-    )
+    ]
+
+
+def _team_reached_round(
+    model: TournamentModel,
+    actual_data: Mapping[str, Any],
+    team_id: str,
+    round_name: str,
+) -> bool:
+    if round_name == "round_of_32":
+        return any(
+            team_id in {match.home_team_id, match.away_team_id}
+            for match in _actual_matches(model, actual_data, "round_of_32")
+        )
+    round_index = _MAIN_BRACKET_ROUND_INDEX.get(round_name)
+    if round_index is None:
+        return False
+    previous_round = _MAIN_BRACKET_ROUNDS[round_index - 1]
+    return _team_won_round(model, actual_data, team_id, previous_round)
 
 
 def _team_missed_round_of_32(

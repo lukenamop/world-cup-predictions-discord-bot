@@ -87,7 +87,7 @@ Exports and backups are returned as ephemeral JSON attachments and write audit l
 
 Scoring uses the MVP defaults from `PRODUCT-SPEC.md`: group winner +3, group runner-up +2, advancing third-place team +1, Round of 32 +1, Round of 16 +2, quarter-final +5, semi-final +10, final +15, champion +25, runner-up +15, and third-place +10. Admins can adjust those values with `/admin config`.
 
-Group winner/runner-up and best-third points are awarded only after the relevant group-stage data is complete. Knockout advancement points are team-based: a user gets credit when a predicted team reaches the scored round, even if the exact path differs from their prediction.
+Group winner/runner-up and best-third points are awarded only after the relevant group-stage data is complete. Knockout advancement points are team-based: a user gets credit when a predicted team reaches the scored round, even if the exact path differs from their prediction. Those points can appear as individual knockout winners are confirmed; the later round does not need every matchup filled first.
 
 Live results are normally synced by the bot process and operator tools. Admins do not manually enter official results in the MVP, but they can run `/admin recalc` to recompute scores from already stored results.
 
@@ -300,9 +300,12 @@ Migration `010_normalize_generated_knockout_ids.sql` normalizes legacy generated
 
 ### Tests
 
+Use the project virtualenv Python for tests so the installed Pycord and dev
+dependencies are available. Avoid bare `python` or system `python3` when
+`.venv/bin/python` exists.
+
 ```bash
-. .venv/bin/activate
-python -m unittest discover tests
+.venv/bin/python -m unittest discover tests
 ```
 
 ### Release Readiness

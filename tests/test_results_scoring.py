@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from world_cup_bot.domain.predictions import (
     ROUND_ORDER,
+    RoundMatch,
     TournamentModel,
     empty_prediction_data,
     get_round_matches,
@@ -41,6 +42,9 @@ from world_cup_bot.services.sample_predictions import build_random_prediction_da
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_MAIN_BRACKET_ROUNDS = tuple(
+    round_name for round_name in ROUND_ORDER if round_name != "third_place"
+)
 
 
 class StandingsTests(unittest.TestCase):
@@ -250,6 +254,37 @@ class ScoringTests(unittest.TestCase):
 
         self.assertIn(first_round_match.home_team_id, round_of_32["hits"])
         self.assertEqual(round_of_32["points"], 32)
+
+    def test_knockout_advancement_counts_partial_winners_for_each_later_round(self) -> None:
+        model = TournamentModel.from_config(_prediction_config())
+        prediction = _complete_home_winner_prediction(model)
+        transitions = (
+            ("round_of_32", "round_of_16", 2),
+            ("round_of_16", "quarter_finals", 5),
+            ("quarter_finals", "semi_finals", 10),
+            ("semi_finals", "final", 15),
+        )
+
+        for current_round, next_round, expected_points in transitions:
+            with self.subTest(current_round=current_round, next_round=next_round):
+                results = _group_results_for_rankings(model)
+                for round_name in _MAIN_BRACKET_ROUNDS:
+                    if round_name == current_round:
+                        break
+                    results.extend(
+                        _knockout_results_for_round(model, prediction, round_name)
+                    )
+                current_match = get_round_matches(model, prediction, current_round)[0]
+                results.append(_knockout_result_for_match(current_round, current_match))
+
+                score = score_prediction(model, prediction, results)
+                advancement = {
+                    row["round"]: row
+                    for row in score.details["knockout"]["advancement"]
+                }
+
+                self.assertIn(current_match.winner_team_id, advancement[next_round]["hits"])
+                self.assertEqual(advancement[next_round]["points"], expected_points)
 
     def test_later_knockout_points_wait_for_finished_matches(self) -> None:
         model = TournamentModel.from_config(_prediction_config())
@@ -811,21 +846,33 @@ def _knockout_results_from_prediction(
 ) -> list[MatchResult]:
     results: list[MatchResult] = []
     for round_name in ROUND_ORDER:
-        for match in get_round_matches(model, prediction, round_name):
-            results.append(
-                MatchResult(
-                    match_id=match.id,
-                    stage="knockout",
-                    round_name=round_name,
-                    home_team_id=match.home_team_id,
-                    away_team_id=match.away_team_id,
-                    status="FINISHED",
-                    home_score=1,
-                    away_score=0,
-                    winner_team_id=match.winner_team_id,
-                )
-            )
+        results.extend(_knockout_results_for_round(model, prediction, round_name))
     return results
+
+
+def _knockout_results_for_round(
+    model: TournamentModel,
+    prediction: dict[str, object],
+    round_name: str,
+) -> list[MatchResult]:
+    return [
+        _knockout_result_for_match(round_name, match)
+        for match in get_round_matches(model, prediction, round_name)
+    ]
+
+
+def _knockout_result_for_match(round_name: str, match: RoundMatch) -> MatchResult:
+    return MatchResult(
+        match_id=match.id,
+        stage="knockout",
+        round_name=round_name,
+        home_team_id=match.home_team_id,
+        away_team_id=match.away_team_id,
+        status="FINISHED",
+        home_score=1,
+        away_score=0,
+        winner_team_id=match.winner_team_id,
+    )
 
 
 def _prediction_config() -> dict[str, object]:

@@ -141,9 +141,11 @@ Only add Discord application values beyond `DISCORD_TOKEN` when implementation a
 
 ## Testing
 
-Before finishing meaningful code changes, run relevant tests. Prefer
-`python -m unittest discover tests` for the full local suite, or targeted
-`python -m unittest tests.test_module` commands for focused verification.
+Before finishing meaningful code changes, run relevant tests with the checked-out
+virtualenv Python. Prefer `.venv/bin/python -m unittest discover tests` for the
+full local suite, or targeted `.venv/bin/python -m unittest tests.test_module`
+commands for focused verification. Do not use bare `python` or system `python3`
+for tests when `.venv/bin/python` is available.
 Minimum expected coverage as features appear:
 
 - Tournament import validation.
